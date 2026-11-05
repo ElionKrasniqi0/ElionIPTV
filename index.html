@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ELION IPTV</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <div id="splash" class="splash-boot" aria-hidden="true"></div>
+
+    <div class="app-shell" id="shell">
+      <nav class="side-nav" aria-label="Main">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <h1>ELION</h1>
+            <span>IPTV</span>
+          </div>
+        </div>
+
+        <button class="nav-item active" data-focusable data-nav="home"><span class="icon">⌂</span> Home</button>
+        <button class="nav-item" data-focusable data-nav="live"><span class="icon">▶</span> Live TV</button>
+        <button class="nav-item" data-focusable data-nav="channels"><span class="icon">☰</span> All Channels</button>
+        <button class="nav-item" data-focusable data-nav="categories"><span class="icon">▦</span> Categories</button>
+        <button class="nav-item" data-focusable data-nav="favorites"><span class="icon">★</span> Favorites</button>
+        <button class="nav-item" data-focusable data-nav="more"><span class="icon">⋯</span> More</button>
+
+        <div class="nav-footer">Use the remote arrows and OK</div>
+      </nav>
+
+      <main class="main-stage">
+        <header class="topbar">
+          <h2 id="screenTitle">Home</h2>
+          <div class="topbar-meta">
+            <span class="chip" id="channelCountChip">0 ch</span>
+            <span id="clock">--:--</span>
+          </div>
+        </header>
+        <div class="loading-bar" id="globalLoading"><span></span></div>
+        <section class="content" id="content" tabindex="-1"></section>
+      </main>
+    </div>
+
+    <div id="playerScreen" class="player-screen" aria-label="Player">
+      <video id="playerVideo" playsinline webkit-playsinline></video>
+      <div id="playerBuffering" class="player-buffering">Loading channel…</div>
+
+      <div id="channelZapOsd" class="channel-zap-osd" aria-live="polite" aria-hidden="true">
+        <div class="channel-zap-inner">
+          <div id="channelZapLogo" class="channel-zap-logo"></div>
+          <div class="channel-zap-meta">
+            <div id="channelZapNumber" class="channel-zap-number"></div>
+            <div id="channelZapName" class="channel-zap-name">Channel</div>
+            <div id="channelZapProgram" class="channel-zap-program"></div>
+            <div id="channelZapStatus" class="channel-zap-status">Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="playerErrorBox" class="player-error-box" style="display:none">
+        <h3>This channel could not be played</h3>
+        <p id="playerErrorText">It may be temporarily unavailable. You can try again or choose another channel.</p>
+        <div class="btn-row" style="justify-content:center">
+          <button id="btnErrorRetry" class="primary" data-focusable>Try again</button>
+          <button id="btnErrorNext" data-focusable>Next channel</button>
+          <button id="btnErrorBack" data-focusable>Back to list</button>
+        </div>
+      </div>
+
+      <div id="playerChannelList" class="player-channel-list" aria-hidden="true">
+        <div class="player-channel-list-panel">
+          <div class="player-channel-list-header">
+            <h3>Channels</h3>
+            <button id="btnCloseChannelList" class="ghost" data-focusable type="button">Close</button>
+          </div>
+          <div id="playerChannelListBody" class="player-channel-list-body"></div>
+        </div>
+      </div>
+
+      <div class="player-overlay">
+        <div class="player-top">
+          <div id="playerLogo" class="player-logo"></div>
+          <div>
+            <div class="player-title" id="playerTitle">Channel</div>
+            <div class="player-sub" id="playerSub"></div>
+            <div class="player-info" id="playerInfo"></div>
+          </div>
+        </div>
+        <nav class="player-control-bar" aria-label="Playback controls">
+          <div class="player-ctrl-item player-ctrl-item-category">
+            <button id="btnChannelList" class="player-ctrl" data-focusable type="button" title="Category" aria-label="Category">
+              <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 12h36M6 24h36M6 36h36" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
+            </button>
+            <span class="ctrl-label">Category</span>
+          </div>
+          <div class="player-ctrl-group player-ctrl-group-center" role="group" aria-label="Playback">
+            <div class="player-ctrl-item">
+              <button id="btnPrev" class="player-ctrl" data-focusable type="button" title="Previous channel" aria-label="Previous Channel">
+                <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M22 10 L8 24 L22 38 M40 10 L26 24 L40 38" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg>
+              </button>
+              <span class="ctrl-label">Previous Channel</span>
+            </div>
+            <div class="player-ctrl-item player-ctrl-item-primary">
+              <button id="btnPlayPause" class="player-ctrl player-ctrl-primary" data-focusable type="button" title="Pause" aria-label="Pause">
+                <svg class="ctrl-svg icon-pause" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 10h8v28h-8zM26 10h8v28h-8z" fill="currentColor"/></svg>
+                <svg class="ctrl-svg icon-play" viewBox="0 0 48 48" aria-hidden="true"><path d="M16 10 L38 24 L16 38 Z" fill="currentColor"/></svg>
+              </button>
+              <span class="ctrl-label">Pause</span>
+            </div>
+            <div class="player-ctrl-item">
+              <button id="btnNext" class="player-ctrl" data-focusable type="button" title="Next channel" aria-label="Next Channel">
+                <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M8 10 L22 24 L8 38 M26 10 L40 24 L26 38" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg>
+              </button>
+              <span class="ctrl-label">Next Channel</span>
+            </div>
+          </div>
+        </nav>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite">No internet connection — saved playlists and channels remain available.</div>
+  </div>
+
+  <script src="js/lib/webOSTV.js"></script>
+  <script src="js/lib/webOSTV-dev.js"></script>
+  <script src="js/compat.js"></script>
+  <script src="js/logger.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/errors.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/m3u-parser.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/playlist-manager.js"></script>
+  <script src="js/favorites.js"></script>
+  <script src="js/parental.js"></script>
+  <script src="js/channels.js"></script>
+  <script src="js/epg.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/pairing.js"></script>
+  <script src="js/focus.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/settings-ui.js"></script>
+  <script src="js/screens.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

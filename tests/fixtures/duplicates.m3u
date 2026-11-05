@@ -1,0 +1,7 @@
+﻿#EXTM3U
+#EXTINF:-1,First
+https://example.com/same.m3u8
+#EXTINF:-1,Second
+https://example.com/same.m3u8
+#EXTINF:-1,Third
+https://example.com/other.m3u8

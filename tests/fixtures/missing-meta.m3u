@@ -1,0 +1,5 @@
+﻿#EXTM3U
+#EXTINF:-1,Only Name
+https://example.com/only.m3u8
+#EXTINF:-1,
+https://example.com/noname.m3u8

@@ -1,0 +1,5 @@
+﻿#EXTM3U
+#EXTINF:-1 tvg-logo="https://cdn.example.com/a.png",Logo A
+https://example.com/a.m3u8
+#EXTINF:-1 tvg-logo="https://cdn.example.com/b.png",Logo B
+https://example.com/b.m3u8

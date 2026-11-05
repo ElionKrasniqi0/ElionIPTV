@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ELION IPTV · Phone / PC Import</title>
+  <style>
+    :root { color-scheme: dark; font-family: "Trebuchet MS", Segoe UI, sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #0b1220; color: #f3f6fb;
+      background-image: radial-gradient(800px 400px at 20% 0%, rgba(20,184,166,.2), transparent 50%); }
+    main { max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; }
+    h1 { letter-spacing: .08em; margin: 0 0 8px; }
+    p { color: #9aa8bf; line-height: 1.45; }
+    label { display: block; margin: 16px 0 8px; color: #9aa8bf; font-size: 14px; }
+    input, textarea { width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
+      background: #0a1220; color: inherit; padding: 12px 14px; font: inherit; }
+    textarea { min-height: 180px; }
+    button { margin-top: 18px; border: 0; border-radius: 10px; padding: 14px 18px; font: inherit; font-weight: 700;
+      background: linear-gradient(180deg, #2dd4bf, #14b8a6); color: #04201c; cursor: pointer; width: 100%; }
+    .status { margin-top: 16px; min-height: 24px; }
+    .ok { color: #34d399; } .err { color: #f87171; }
+    .card { background: rgba(18,26,43,.9); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 22px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ELION IPTV</h1>
+    <p>Submit an M3U playlist URL or paste playlist text. The TV will import it after you enter the same pairing code shown on screen.</p>
+    <div class="card">
+      <label for="code">Pairing code</label>
+      <input id="code" maxlength="8" placeholder="ABC123" autocomplete="off">
+
+      <label for="name">Playlist name (optional)</label>
+      <input id="name" placeholder="My IPTV">
+
+      <label for="url">M3U URL (optional)</label>
+      <input id="url" placeholder="https://example.com/playlist.m3u">
+
+      <label for="content">Or paste M3U content</label>
+      <textarea id="content" placeholder="#EXTM3U"></textarea>
+
+      <button id="send">Send to TV</button>
+      <div class="status" id="status"></div>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      if (params.get('code')) document.getElementById('code').value = params.get('code');
+
+      document.getElementById('send').addEventListener('click', function () {
+        var code = document.getElementById('code').value.trim().toUpperCase();
+        var name = document.getElementById('name').value.trim();
+        var url = document.getElementById('url').value.trim();
+        var content = document.getElementById('content').value;
+        var status = document.getElementById('status');
+        status.className = 'status';
+        status.textContent = 'Sending…';
+
+        if (!code) { status.className = 'status err'; status.textContent = 'Enter the pairing code from the TV.'; return; }
+        if (!url && !content.trim()) { status.className = 'status err'; status.textContent = 'Provide a URL or paste M3U content.'; return; }
+
+        fetch('/api/pair/' + encodeURIComponent(code) + '/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url, content: content, name: name || 'Phone/PC Import' })
+        }).then(function (res) { return res.json().then(function (j) { return { res: res, j: j }; }); })
+          .then(function (x) {
+            if (!x.res.ok) throw new Error(x.j.error || ('HTTP ' + x.res.status));
+            status.className = 'status ok';
+            status.textContent = 'Sent. Keep this page open a moment — the TV should import automatically.';
+          }).catch(function (err) {
+            status.className = 'status err';
+            status.textContent = err.message || String(err);
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

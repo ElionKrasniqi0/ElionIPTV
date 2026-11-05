@@ -1,0 +1,7 @@
+﻿#EXTM3U
+#EXTINF:-1 group-title="News",News 1
+https://example.com/n1.m3u8
+#EXTINF:-1 group-title="Sports",Sports 1
+https://example.com/s1.m3u8
+#EXTINF:-1 group-title="News",News 2
+https://example.com/n2.m3u8

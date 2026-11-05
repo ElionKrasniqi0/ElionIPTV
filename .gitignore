@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.ipk
+.DS_Store
+Thumbs.db
+*.log
+.env
+companion/node_modules/

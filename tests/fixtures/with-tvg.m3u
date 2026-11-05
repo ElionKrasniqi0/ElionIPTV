@@ -1,0 +1,3 @@
+﻿#EXTM3U
+#EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" group-title="UK",BBC One
+https://example.com/bbc1.m3u8

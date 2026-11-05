@@ -1,0 +1,5 @@
+﻿#EXTM3U
+#EXTINF:-1 tvg-logo="javascript:alert(1)",XSS Logo
+javascript:alert(1)
+#EXTINF:-1 tvg-logo="https://ok.example/l.png",Safe
+https://example.com/ok.m3u8
