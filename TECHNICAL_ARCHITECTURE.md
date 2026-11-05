@@ -2,7 +2,7 @@
 
 ELION IPTV is a single-page webOS web application. There is no bundler. `index.html` loads scripts in order. Shared state sits on `window` as `Elion*` objects.
 
-Version: 1.0.9 (`appinfo.json`).
+Version: 1.1.0 (`appinfo.json`).
 
 ## Entry
 

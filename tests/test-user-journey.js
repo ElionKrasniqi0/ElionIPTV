@@ -26,36 +26,39 @@ var css = fs.readFileSync(path.join(root, 'css/app.css'), 'utf8');
 var appinfo = JSON.parse(fs.readFileSync(path.join(root, 'appinfo.json'), 'utf8'));
 
 assert(appinfo.id === 'com.elion.iptv', 'App ID preserved');
-assert(appinfo.version === '1.0.9', 'Version is 1.0.9');
+assert(appinfo.version === '1.1.0', 'Version is 1.1.0');
 
-/* ---- Home (10 tiles) ---- */
+/* ---- Home (six destinations) ---- */
 assert(screens.indexOf("hubTile('live'") !== -1, 'Home: Live TV tile');
-assert(screens.indexOf("hubTile('channels'") !== -1, 'Home: All Channels tile');
-assert(screens.indexOf("hubTile('categories'") !== -1, 'Home: Categories tile');
+assert(screens.indexOf("hubTile('movies'") !== -1, 'Home: Movies tile');
+assert(screens.indexOf("hubTile('series'") !== -1, 'Home: Series tile');
+assert(screens.indexOf("hubTile('epg'") !== -1, 'Home: Live with EPG tile');
+assert(screens.indexOf("hubTile('playlists'") !== -1, 'Home: Add Playlist tile');
 assert(screens.indexOf("hubTile('favorites'") !== -1, 'Home: Favorites tile');
-assert(screens.indexOf("hubTile('recents'") !== -1, 'Home: Recently Watched tile');
-assert(screens.indexOf("hubTile('search'") !== -1, 'Home: Search tile');
-assert(screens.indexOf("hubTile('epg'") !== -1, 'Home: TV Guide tile');
-assert(screens.indexOf("hubTile('playlists'") !== -1, 'Home: My Playlists tile');
-assert(screens.indexOf("hubTile('settings'") !== -1, 'Home: Settings tile');
-assert(screens.indexOf("hubTile('about'") !== -1, 'Home: About tile');
 assert(screens.indexOf("hubTile('more'") === -1, 'Home hub has no More tile');
 assert(screens.indexOf("hubTile('home'") === -1, 'Home hub has no Home tile');
 assert(screens.indexOf('Start watching now') !== -1, 'Home tiles include descriptions');
 assert(screens.indexOf('home-brand-bar') !== -1, 'Home shows brand bar');
-assert(screens.indexOf('Reload IPTV') !== -1, 'Home includes Reload IPTV');
+assert(screens.indexOf('Reload IPTV') !== -1, 'Reload IPTV remains available');
+assert(html.indexOf('id="btnReload"') !== -1, 'Header reload button');
+assert(html.indexOf('id="btnMessages"') !== -1, 'Header messages button');
+assert(html.indexOf('id="btnHelp"') !== -1, 'Header help button');
+assert(html.indexOf('id="btnExit"') !== -1, 'Header exit button');
+assert(html.indexOf('Do you really want to exit ELION IPTV?') !== -1 || app.indexOf('Do you really want to exit ELION IPTV?') !== -1, 'Exit asks for confirmation');
 assert(css.indexOf('hub-grid-home') !== -1, 'Home uses the full hub grid');
-assert(css.indexOf('span 3') !== -1, 'Home grid balances the extra Reload tile');
+assert(css.indexOf('repeat(3, minmax(0, 1fr))') !== -1, 'Home grid is three columns');
 assert(/#app\s*\{[\s\S]*width:\s*100%/.test(css), 'App root uses full viewport width');
 assert(css.indexOf('screen-page') !== -1, 'Shared screen page layout');
 assert(css.indexOf('screen-heading') !== -1, 'Shared screen headings');
 
 /* ---- Live TV ---- */
 assert(screens.indexOf('function renderLive') !== -1, 'Live TV screen exists');
-assert(screens.indexOf('live-hero') !== -1, 'Live TV featured hero card');
-assert(screens.indexOf("name === 'live'") !== -1 || screens.indexOf('name === "live"') !== -1, 'Live navigation autoplays');
-assert(screens.indexOf('openPlayer(ch)') !== -1, 'Live opens player');
-assert(css.indexOf('.live-hero') !== -1, 'Live hero styles');
+assert(screens.indexOf('categoryCards(true)') !== -1, 'Live TV opens category cards');
+assert(screens.indexOf('function renderMovies') !== -1, 'Movies screen exists');
+assert(screens.indexOf('function renderSeries') !== -1, 'Series screen exists');
+assert(screens.indexOf('No series found in your current playlist.') !== -1, 'Series empty state is explicit');
+assert(screens.indexOf('openPlayer(ch)') !== -1, 'Selecting a channel opens the player');
+assert(!/if\s*\(\s*name\s*===\s*'live'\s*\)[\s\S]{0,300}openPlayer\(/.test(screens), 'Live TV does not autoplay');
 
 /* ---- All Channels / Categories / Favorites / Recents / Search ---- */
 assert(screens.indexOf('function renderChannels') !== -1, 'All Channels screen exists');
@@ -80,6 +83,8 @@ assert(screens.indexOf('Your playlist has been added successfully.') !== -1, 'Fr
 assert(screens.indexOf('Unable to load the playlist. Please check the address and try again.') !== -1, 'Friendly import failure');
 assert(screens.indexOf('Your favorite channels will appear here.') !== -1, 'Friendly favorites empty');
 assert(screens.indexOf('No recently watched channels yet.') !== -1, 'Friendly recents empty');
+assert(screens.indexOf('No EPG source is configured.') !== -1, 'EPG empty state is explicit');
+assert(screens.indexOf('id="m3uFile"') !== -1, 'Local playlist file picker exists');
 assert(screens.indexOf('Select Playlist') !== -1, 'Playlist Select label');
 assert(screens.indexOf('Refresh Channels') !== -1, 'Playlist Refresh label');
 assert(screens.indexOf('Remove Playlist') !== -1, 'Playlist Remove label');
@@ -90,7 +95,7 @@ assert(ui.indexOf('channel-row-wrap') !== -1, 'Channel row + favorite are separa
 assert(screens.indexOf('focusPreferred') !== -1, 'Screens use preferred focus after render');
 assert(screens.indexOf('focusChannelId') !== -1, 'Render can restore channel focus');
 assert(screens.indexOf("groupFilter.addEventListener('change'") !== -1 || screens.indexOf('groupFilter.addEventListener("change"') !== -1, 'Category filter applies on change');
-assert(screens.indexOf('Add Playlist') !== -1 && screens.indexOf('data-nav="home">← Home') !== -1, 'Playlists Back returns Home');
+assert(screens.indexOf('Add Playlist') !== -1 && screens.indexOf('data-action="go-back"') !== -1 && screens.indexOf('>BACK<') !== -1, 'Playlists Back returns Home');
 assert(screens.indexOf('data-nav="more">← More') === -1, 'Primary screens no longer Back to More');
 assert(screens.indexOf("action === 'clear-search'") !== -1, 'Clear search handler');
 

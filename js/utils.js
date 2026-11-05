@@ -98,6 +98,8 @@
    * @param {{ accept?: 'playlist'|'any'|'xml', retries?: number }} [options]
    *   accept 'playlist' (default) validates M3U-like body; 'any'/'xml' skip that check (EPG).
    */
+  var downloadLanes = { playlist: null, xml: null };
+
   function downloadText(url, timeoutMs, options) {
     if (timeoutMs && typeof timeoutMs === 'object') {
       options = timeoutMs;
@@ -116,8 +118,22 @@
       return Promise.reject(new Error('No internet connection. Saved playlists are still available.'));
     }
 
+    var lane = accept === 'xml' ? 'xml' : 'playlist';
+    if (downloadLanes[lane]) {
+      downloadLanes[lane].superseded = true;
+      try { downloadLanes[lane].abort(); } catch (eLane) { /* ignore */ }
+    }
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    if (ctrl) downloadLanes[lane] = ctrl;
+
     var runner = function () {
-      return downloadTextOnce(url, timeoutMs, accept);
+      return downloadTextOnce(url, timeoutMs, accept, ctrl).then(function (text) {
+        if (downloadLanes[lane] === ctrl) downloadLanes[lane] = null;
+        return text;
+      }, function (err) {
+        if (downloadLanes[lane] === ctrl) downloadLanes[lane] = null;
+        throw err;
+      });
     };
 
     if (global.ElionNet && typeof ElionNet.withRetry === 'function' && options.retries !== 0) {
@@ -130,7 +146,7 @@
     return runner();
   }
 
-  function downloadTextOnce(url, timeoutMs, accept) {
+  function downloadTextOnce(url, timeoutMs, accept, ctrl) {
     return new Promise(function (resolve, reject) {
       var settled = false;
       function fail(msg) {
@@ -172,7 +188,7 @@
 
       // Prefer fetch on modern webOS; fall back to XHR
       if (typeof fetch === 'function') {
-        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        if (!ctrl && typeof AbortController !== 'undefined') ctrl = new AbortController();
         var opts = {
           method: 'GET',
           credentials: 'omit',
@@ -204,6 +220,10 @@
           var msg = String(err && err.message || err || '');
           var name = err && err.name ? String(err.name) : '';
           // Do not XHR-fallback after our own AbortController timeout
+          if (ctrl && ctrl.superseded) {
+            fail('Request superseded.');
+            return;
+          }
           if (/AbortError/i.test(name) || /aborted|abort/i.test(msg)) {
             fail('Request timed out after ' + Math.round(timeoutMs / 1000) + 's. Check the network or try paste / Phone-PC import.');
             return;

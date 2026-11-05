@@ -1,0 +1,7 @@
+#EXTM3U
+#EXTINF:-1 group-title="News, World",Late News
+https://example.com/b-news.m3u8
+#EXTINF:-1 group-title="Sports & Live",Match
+https://example.com/b-sports.m3u8
+#EXTINF:-1 group-title="Kids Zone",Cartoon
+https://example.com/b-kids.m3u8

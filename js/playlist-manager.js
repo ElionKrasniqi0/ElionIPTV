@@ -13,7 +13,8 @@
     loading: false,
     lastError: null,
     parseProgress: null,
-    activePlaylistId: ''
+    activePlaylistId: '',
+    restoreError: ''
   };
 
   var listeners = [];
@@ -66,8 +67,38 @@
       parseProgress: state.parseProgress,
       channelCount: visible.length,
       activePlaylistId: activeId,
-      activePlaylist: getPlaylistById(activeId)
+      activePlaylist: getPlaylistById(activeId),
+      phase: libraryPhase()
     };
+  }
+
+  function channelCountFor(playlistId) {
+    var n = 0;
+    for (var i = 0; i < state.channels.length; i++) {
+      if (state.channels[i].playlistId === playlistId) n++;
+    }
+    return n;
+  }
+
+  function libraryPhase() {
+    if (state.restoreError && !state.playlists.length) return 'recover';
+    if (!state.playlists.length) return 'none';
+    var active = getPlaylistById(resolveActivePlaylistId());
+    if (!active) return 'recover';
+    if (!channelCountFor(active.id)) return 'empty';
+    return 'ready';
+  }
+
+  function nextActiveId(excludingId) {
+    var withChannels = '';
+    var any = '';
+    for (var i = 0; i < state.playlists.length; i++) {
+      var id = state.playlists[i].id;
+      if (id === excludingId) continue;
+      if (!any) any = id;
+      if (!withChannels && channelCountFor(id) > 0) withChannels = id;
+    }
+    return withChannels || any || '';
   }
 
   function getPlaylistById(id) {
@@ -80,14 +111,17 @@
 
   function rebuildCategories() {
     var map = Object.create(null);
+    var order = [];
     var channels = getVisibleChannels();
     for (var i = 0; i < channels.length; i++) {
       var g = channels[i].group || 'Uncategorized';
-      map[g] = (map[g] || 0) + 1;
+      if (map[g] == null) {
+        map[g] = 0;
+        order.push(g);
+      }
+      map[g]++;
     }
-    state.categories = Object.keys(map).sort(function (a, b) {
-      return a.localeCompare(b);
-    }).map(function (name) {
+    state.categories = order.map(function (name) {
       return { name: name, count: map[name] };
     });
   }
@@ -127,9 +161,46 @@
     return { ok: true, playlistId: playlistId };
   }
 
+  function recoverPlaylistsFromChannels() {
+    if (state.playlists.length || !state.channels.length) return;
+    var counts = Object.create(null);
+    var order = [];
+    for (var i = 0; i < state.channels.length; i++) {
+      var id = state.channels[i].playlistId;
+      if (!id) continue;
+      if (!counts[id]) {
+        counts[id] = 0;
+        order.push(id);
+      }
+      counts[id]++;
+    }
+    if (!order.length) return;
+    var now = Date.now();
+    state.playlists = order.map(function (id) {
+      return {
+        id: id,
+        name: order.length === 1 ? 'Restored playlist' : ('Restored playlist ' + (order.indexOf(id) + 1)),
+        sourceType: 'paste',
+        url: '',
+        channelCount: counts[id],
+        updatedAt: now,
+        createdAt: now,
+        epgUrl: '',
+        fileName: ''
+      };
+    });
+    if (!state.activePlaylistId || !getPlaylistById(state.activePlaylistId)) {
+      state.activePlaylistId = state.playlists[0].id;
+    }
+    state.restoreError = '';
+    persist();
+    ElionLog.warn('Playlist details were missing. Restored ' + state.playlists.length + ' playlist from saved channels.');
+  }
+
   function loadFromStorage() {
     try {
       // Intentionally empty on first launch — never inject demo/sample playlists
+      state.restoreError = '';
       state.playlists = ElionStorage.getPlaylists() || [];
       state.channels = ElionStorage.getChannels() || [];
       var settings = ElionStorage.getSettings();
@@ -140,6 +211,7 @@
       if (!state.activePlaylistId && state.playlists.length) {
         state.activePlaylistId = state.playlists[0].id;
       }
+      recoverPlaylistsFromChannels();
       rebuildCategories();
       rebuildSearch();
       emit();
@@ -153,6 +225,7 @@
       state.channels = [];
       state.categories = [];
       state.activePlaylistId = '';
+      state.restoreError = (e && e.message) || 'storage';
       ElionErrors.show(ElionErrors.create('STORAGE', e.message));
       emit();
     }
@@ -258,7 +331,8 @@
       channelCount: parsed.channels.length,
       updatedAt: Date.now(),
       createdAt: meta.createdAt || (existing && existing.createdAt) || Date.now(),
-      epgUrl: (parsed.header && (parsed.header['url-tvg'] || parsed.header['x-tvg-url'])) || meta.epgUrl || (existing && existing.epgUrl) || ''
+      epgUrl: (parsed.header && (parsed.header['url-tvg'] || parsed.header['x-tvg-url'])) || meta.epgUrl || (existing && existing.epgUrl) || '',
+      fileName: meta.fileName != null ? String(meta.fileName) : ((existing && existing.fileName) || '')
     };
 
     var oldIds = [];
@@ -382,6 +456,9 @@
     }).catch(function (err) {
       setLoading(false);
       importInFlight = null;
+      if (err && /superseded/i.test(err.message || '')) {
+        return { ok: false, superseded: true, errors: [] };
+      }
       // Never delete stored playlists because of a download failure
       var e = ElionErrors.fromException(err, 'NETWORK');
       state.lastError = e.message;
@@ -442,7 +519,7 @@
     pruneFavoritesAndRecents(removedIds);
 
     if (state.activePlaylistId === playlistId) {
-      state.activePlaylistId = state.playlists.length ? state.playlists[0].id : '';
+      state.activePlaylistId = nextActiveId(playlistId);
     }
     var settings = ElionStorage.getSettings();
     if (settings.defaultPlaylistId === playlistId) {
@@ -471,6 +548,7 @@
   global.ElionPlaylists = {
     loadFromStorage: loadFromStorage,
     getState: getState,
+    getLibraryPhase: libraryPhase,
     onChange: onChange,
     importFromText: importFromText,
     importFromTextAsync: importFromTextAsync,

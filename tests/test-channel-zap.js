@@ -28,10 +28,14 @@ var html = load('index.html');
 var css = load('css/app.css');
 var appinfo = JSON.parse(load('appinfo.json'));
 
-assert(appinfo.version === '1.0.9', 'Version is 1.0.9');
+assert(appinfo.version === '1.1.0', 'Version is 1.1.0');
 
 /* Direction: UP = next (+1), DOWN = previous (-1) */
 assert(focus.indexOf("playerChannelStep(dir === 'up' ? 1 : -1)") !== -1, 'UP maps to next channel (+1)');
+assert(focus.indexOf('CHANNEL_UP: 427') !== -1 && focus.indexOf('CHANNEL_DOWN: 428') !== -1, 'LG CH+ and CH- key codes');
+assert(focus.indexOf('playerChannelKey(channelDelta)') !== -1, 'CH keys use the channel step');
+assert(app.indexOf('function playerChannelKey') !== -1, 'CH keys close lists then step');
+assert(app.indexOf('function playableChannel') !== -1, 'Zap skips entries without a playable address');
 assert(focus.indexOf("dir === 'up' ? -1") === -1, 'UP is not mapped to previous');
 
 /* Works with controls visible or hidden — no isPlayerUiVisible gate on zap */

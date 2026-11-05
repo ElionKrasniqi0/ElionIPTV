@@ -115,22 +115,19 @@
 
   function set(name, value) {
     memory[name] = value;
-    // Large blobs prefer IndexedDB — localStorage often caps near ~5MB on TVs
+    // Large blobs prefer IndexedDB — localStorage often caps near ~5MB on TVs.
+    // Count is enough; stringifying thousands of channels on the TV thread is avoided.
     var large = name === 'channels' || name === 'epgCache';
-    var approx = 0;
-    try {
-      approx = large ? JSON.stringify(value).length : 0;
-    } catch (e) {
-      approx = 0;
-    }
-    var tooBigForLs = large && approx > 3.5 * 1024 * 1024;
+    var manyChannels = name === 'channels' && Array.isArray(value) && value.length > 500;
+    var manyProgrammes = name === 'epgCache' && value && value.programmes && Object.keys(value.programmes).length > 200;
+    var tooBigForLs = !!(idb && large && (manyChannels || manyProgrammes));
     var ok = false;
     if (!tooBigForLs) {
       ok = lsSet(name, value);
     } else {
       // Avoid QuotaExceededError for multi‑MB channel catalogs
       try { localStorage.setItem(key(name + '_idb'), '1'); } catch (e) { /* ignore */ }
-      if (global.ElionLog) ElionLog.info('Using IndexedDB for large key', { name: name, approxBytes: approx });
+      if (global.ElionLog) ElionLog.info('Using IndexedDB for large key', { name: name });
     }
     if (large || !ok || tooBigForLs) {
       idbSet(name, value).then(function (wrote) {
@@ -178,7 +175,13 @@
       parentalEnabled: false,
       lockedGroups: [],
       lockedChannels: [],
-      themeAccent: '#14B8A6'
+      themeAccent: '#168BFF',
+      clockFormat: '24',
+      epgOffsetMinutes: 0,
+      epgSourceUrl: '',
+      epgAutoRefresh: false,
+      hiddenGroups: [],
+      playerControlsPinned: false
     };
   }
 
@@ -191,8 +194,18 @@
     if (next.theme !== 'light' && next.theme !== 'dark') next.theme = 'dark';
     if (!Array.isArray(next.lockedGroups)) next.lockedGroups = [];
     if (!Array.isArray(next.lockedChannels)) next.lockedChannels = [];
+    if (!Array.isArray(next.hiddenGroups)) next.hiddenGroups = [];
+    next.hiddenGroups = next.hiddenGroups.filter(function (name) { return typeof name === 'string'; });
+    next.epgAutoRefresh = !!next.epgAutoRefresh;
+    next.playerControlsPinned = !!next.playerControlsPinned;
+    next.autoplayNext = !!next.autoplayNext;
+    if (typeof next.epgSourceUrl !== 'string') next.epgSourceUrl = '';
     if (typeof next.preferredAudio !== 'string') next.preferredAudio = '';
     if (typeof next.preferredSubtitle !== 'string') next.preferredSubtitle = '';
+    if (next.clockFormat !== '12' && next.clockFormat !== '24') next.clockFormat = '24';
+    var epgOffset = parseInt(next.epgOffsetMinutes, 10);
+    next.epgOffsetMinutes = isFinite(epgOffset) ? Math.max(-720, Math.min(720, epgOffset)) : 0;
+    if (!next.themeAccent || /^#14b8a6$/i.test(String(next.themeAccent))) next.themeAccent = '#168BFF';
     return next;
   }
 
@@ -209,7 +222,8 @@
         channelCount: Number(p.channelCount) || 0,
         updatedAt: Number(p.updatedAt) || Date.now(),
         createdAt: Number(p.createdAt) || Date.now(),
-        epgUrl: typeof p.epgUrl === 'string' ? p.epgUrl : ''
+        epgUrl: typeof p.epgUrl === 'string' ? p.epgUrl : '',
+        fileName: typeof p.fileName === 'string' ? p.fileName : ''
       };
     });
   }

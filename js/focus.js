@@ -15,7 +15,8 @@
     ENTER: 13, ESC: 27, BACKSPACE: 8, BACK: 461,
     PLAY: 415, PAUSE: 19, PLAY_PAUSE: 10252,
     STOP: 413, RED: 403, GREEN: 404, YELLOW: 405, BLUE: 406,
-    INFO: 457
+    INFO: 457,
+    CHANNEL_UP: 427, CHANNEL_DOWN: 428
   };
 
   var root = null;
@@ -102,6 +103,10 @@
   function activeScope() {
     var modal = document.getElementById('modalHost');
     if (modal && modal.classList.contains('active')) return modal;
+    var help = document.getElementById('helpPanel');
+    if (help && help.classList.contains('active')) return help;
+    var inbox = document.getElementById('messagesPanel');
+    if (inbox && inbox.classList.contains('active')) return inbox;
     var player = document.getElementById('playerScreen');
     if (player && player.classList.contains('active')) return player;
     return document.getElementById('app') || document.body;
@@ -287,6 +292,42 @@
    * Avoids measuring every focusable on the screen (the main TV freeze).
    */
   function moveStructured(current, direction) {
+    var movieWrap = current.closest ? current.closest('.movie-card-wrap') : null;
+    if (movieWrap && movieWrap.parentElement && movieWrap.parentElement.classList.contains('movie-grid')) {
+      if (direction === 'right' && current.classList.contains('movie-card')) {
+        var movieFav = movieWrap.querySelector('.fav-toggle');
+        if (movieFav) return movieFav;
+      }
+      if (direction === 'left' && current.classList.contains('fav-toggle')) {
+        return movieWrap.querySelector('.movie-card');
+      }
+      var movieCells = movieWrap.parentElement.children;
+      var movieIndex = indexIn(movieCells, movieWrap);
+      if (movieIndex < 0) return null;
+      var movieCols = 1;
+      if (movieCells.length > 1) {
+        var movieTop = movieCells[0].offsetTop;
+        for (var mc = 1; mc < movieCells.length; mc++) {
+          if (movieCells[mc].offsetTop !== movieTop) { movieCols = mc; break; }
+          if (mc === movieCells.length - 1) movieCols = movieCells.length;
+        }
+      }
+      var movieTarget = -1;
+      if (direction === 'left') movieTarget = movieIndex - 1;
+      if (direction === 'right') movieTarget = movieIndex + 1;
+      if (direction === 'up') movieTarget = movieIndex - movieCols;
+      if (direction === 'down') movieTarget = movieIndex + movieCols;
+      if (direction === 'left' || direction === 'right') {
+        var movieRow = Math.floor(movieIndex / movieCols);
+        if (movieTarget < movieRow * movieCols || movieTarget >= (movieRow + 1) * movieCols) return null;
+      }
+      if (movieTarget < 0 || movieTarget >= movieCells.length) return null;
+      var nextMovie = movieCells[movieTarget];
+      if (!nextMovie || !nextMovie.querySelector) return null;
+      if (current.classList.contains('fav-toggle')) return nextMovie.querySelector('.fav-toggle');
+      return nextMovie.querySelector('.movie-card');
+    }
+
     var wrap = current.closest ? current.closest('.channel-row-wrap') : null;
     if (wrap && wrap.parentElement) {
       if (direction === 'right' && current.classList.contains('channel-row')) {
@@ -406,6 +447,19 @@
     if (best) focusEl(best, { spatial: true });
   }
 
+  /**
+   * LG webOS channel rocker. Documented key codes are 427 (CH+) and 428 (CH−).
+   * Some sets also report ChannelUp / ChannelDown. Not every remote delivers these
+   * keys to a web app; Up/Down and the player Previous/Next buttons remain available.
+   */
+  function channelKeyDelta(e) {
+    var code = e.keyCode || e.which || 0;
+    var key = e.key || '';
+    if (code === KEY.CHANNEL_UP || key === 'ChannelUp' || key === 'MediaChannelUp') return 1;
+    if (code === KEY.CHANNEL_DOWN || key === 'ChannelDown' || key === 'MediaChannelDown') return -1;
+    return 0;
+  }
+
   function resolveDirection(e) {
     var code = e.keyCode || e.which;
     var key = e.key || '';
@@ -448,6 +502,17 @@
 
   function onKeyDown(e) {
     var t0 = Date.now();
+    var channelDelta = channelKeyDelta(e);
+    if (channelDelta) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      if (e.repeat || isDuplicateKey(e)) return;
+      if (global.ElionApp && ElionApp.playerChannelKey) ElionApp.playerChannelKey(channelDelta);
+      noteKeyCost(t0, 'channel-key');
+      return;
+    }
+
     var dir = resolveDirection(e);
     var typing = isTextEntryField(e.target) || keyboardVisible;
 
@@ -465,9 +530,27 @@
       lastArrowMove = t0;
 
       if (global.ElionApp && ElionApp.isPlayerActive && ElionApp.isPlayerActive() &&
+          (dir === 'left' || dir === 'right')) {
+        e.preventDefault();
+        e.stopPropagation();
+        if ((ElionApp.isPlayerCategoryOpen && ElionApp.isPlayerCategoryOpen()) ||
+            (ElionApp.isPlayerChannelListOpen && ElionApp.isPlayerChannelListOpen()) ||
+            (ElionApp.isPlayerUiVisible && ElionApp.isPlayerUiVisible())) {
+          move(dir);
+        }
+        noteKeyCost(t0, 'player-side');
+        return;
+      }
+
+      if (global.ElionApp && ElionApp.isPlayerActive && ElionApp.isPlayerActive() &&
           (dir === 'up' || dir === 'down')) {
         e.preventDefault();
         e.stopPropagation();
+        if (ElionApp.isPlayerCategoryOpen && ElionApp.isPlayerCategoryOpen()) {
+          move(dir);
+          noteKeyCost(t0, 'category-move');
+          return;
+        }
         if (ElionApp.isPlayerChannelListOpen && ElionApp.isPlayerChannelListOpen()) {
           move(dir);
           noteKeyCost(t0, 'list-move');
@@ -562,8 +645,11 @@
 
     var code = e.keyCode || e.which;
     if (code === KEY.PLAY || code === KEY.PLAY_PAUSE || code === KEY.PAUSE) {
-      e.preventDefault();
-      if (global.ElionPlayer) ElionPlayer.togglePlayPause();
+      if (global.ElionApp && ElionApp.isPlayerActive && ElionApp.isPlayerActive() && global.ElionPlayer) {
+        e.preventDefault();
+        ElionPlayer.togglePlayPause();
+        if (ElionApp.bumpPlayerUi) ElionApp.bumpPlayerUi();
+      }
     }
   }
 

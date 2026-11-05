@@ -61,10 +61,17 @@
         return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
       });
     } else if (mode === 'category') {
+      var rank = Object.create(null);
+      var cats = [];
+      try { cats = ElionPlaylists.getState().categories || []; } catch (e) { cats = []; }
+      for (var i = 0; i < cats.length; i++) rank[cats[i].name] = i;
       list.sort(function (a, b) {
-        var g = String(a.group || '').localeCompare(String(b.group || ''), undefined, { sensitivity: 'base' });
-        if (g !== 0) return g;
-        return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+        var ga = rank[a.group || 'Uncategorized'];
+        var gb = rank[b.group || 'Uncategorized'];
+        if (ga == null) ga = 1000000;
+        if (gb == null) gb = 1000000;
+        if (ga !== gb) return ga - gb;
+        return (a.number || 0) - (b.number || 0);
       });
     }
     // playlist = original order

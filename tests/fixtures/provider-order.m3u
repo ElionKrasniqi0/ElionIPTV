@@ -1,0 +1,14 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="sp.1" tvg-name="Zebra Sports" tvg-logo="https://cdn.example/zebra.png" group-title="Sports & Live",Zebra Sports
+https://example.com/zebra.m3u8
+#EXTINF:-1 group-title="Kids Zone",Kids One
+https://example.com/kids.m3u8
+#EXTINF:-1 tvg-id="sp.2" tvg-name="Alpha Sports" group-title="Sports & Live",Alpha Sports
+https://example.com/alpha.m3u8
+#EXTINF:-1 tvg-name="Plain Channel",Plain Channel
+https://example.com/plain.m3u8
+#EXTINF:-1 group-title="News, World",World News
+https://example.com/news.m3u8
+#EXTGRP:Should Not Replace
+#EXTINF:-1 group-title="Kids Zone",Kids Two
+https://example.com/kids2.m3u8

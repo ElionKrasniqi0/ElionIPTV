@@ -84,8 +84,10 @@
     var e = err && err.code ? err : fromException(err);
     if (global.ElionLog) ElionLog.error('UI error', e);
     try {
-      if (global.ElionUI && ElionUI.toast) {
-        ElionUI.toast(e.message);
+      if (global.ElionUI && ElionUI.notify) {
+        ElionUI.notify(e.message, 'error');
+      } else if (global.ElionUI && ElionUI.toast) {
+        ElionUI.toast(e.message, 'error');
       }
     } catch (t) { /* ignore */ }
     clearLoadingUi();
@@ -98,6 +100,16 @@
     if (handlersInstalled) return;
     handlersInstalled = true;
 
+    var lastNotice = 0;
+    function noticeOnce() {
+      var now = Date.now();
+      if (now - lastNotice < 5000) return;
+      lastNotice = now;
+      try {
+        if (global.ElionUI && ElionUI.notify) ElionUI.notify(MESSAGES.UNKNOWN, 'error');
+      } catch (e) { /* ignore */ }
+    }
+
     window.addEventListener('error', function (ev) {
       try {
         if (global.ElionLog) {
@@ -105,7 +117,7 @@
         }
       } catch (e) { /* ignore */ }
       clearLoadingUi();
-      // Do not preventDefault — keep DevTools / inspector visibility
+      noticeOnce();
     });
 
     window.addEventListener('unhandledrejection', function (ev) {
@@ -115,6 +127,7 @@
         if (global.ElionLog) ElionLog.error('Unhandled rejection', msg);
       } catch (e) { /* ignore */ }
       clearLoadingUi();
+      noticeOnce();
     });
   }
 

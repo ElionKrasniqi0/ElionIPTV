@@ -100,14 +100,17 @@ assert(empty.channels.length === 0, 'first launch: no channels');
 assert(empty.categories.length === 0, 'first launch: no categories');
 assert(empty.channelCount === 0, 'first launch: channelCount 0');
 assert(!empty.activePlaylistId, 'first launch: no active playlist');
+assert(empty.phase === 'none' && sb1.ElionPlaylists.getLibraryPhase() === 'none', 'first launch shows the add-playlist state');
 
 var welcomeSrc = fs.readFileSync(path.join(root, 'js/screens.js'), 'utf8');
 assert(welcomeSrc.indexOf('Welcome to ELION IPTV') !== -1, 'welcome title present');
-assert(welcomeSrc.indexOf('Add your TV playlist to start watching.') !== -1, 'welcome empty message present');
+assert(welcomeSrc.indexOf('Add your IPTV playlist to start watching your favorite content.') !== -1, 'welcome empty message present');
 assert(welcomeSrc.indexOf('ADD PLAYLIST') !== -1, 'welcome CTA copy present');
 assert(welcomeSrc.indexOf('Add Playlist') !== -1, 'Add Playlist action present');
-assert(welcomeSrc.indexOf("hubTile('live'") !== -1 && welcomeSrc.indexOf("hubTile('recents'") !== -1, 'home hub has Live TV and Recently Watched');
-assert(welcomeSrc.indexOf('afterImportSuccess') !== -1 && welcomeSrc.indexOf("navigate('channels')") !== -1, 'successful import opens channel list');
+assert(welcomeSrc.indexOf("hubTile('live'") !== -1 && welcomeSrc.indexOf("hubTile('favorites'") !== -1, 'home hub has Live TV and Favorites');
+assert(welcomeSrc.indexOf('afterImportSuccess') !== -1 && /function afterImportSuccess[\s\S]{0,500}navigate\('home'/.test(welcomeSrc), 'successful import returns to the dashboard');
+assert(welcomeSrc.indexOf('getLibraryPhase') !== -1, 'dashboard follows playlist state');
+assert(welcomeSrc.indexOf('No channels were found in this playlist.') !== -1, 'empty playlist state');
 assert(!/BigBuckBunny|sample\/demo\.m3u|gtv-videos-bucket/i.test(welcomeSrc), 'no bundled demo stream references in screens');
 assert(!/commondatastorage\.googleapis\.com/i.test(fs.readFileSync(path.join(root, 'js/playlist-manager.js'), 'utf8')), 'playlist-manager has no hardcoded demo URLs');
 
@@ -119,6 +122,12 @@ assert(stA.playlists.length === 1 && stA.playlists[0].name === 'Alpha', 'playlis
 assert(stA.channelCount === 2, 'active library shows 2 channels');
 assert(stA.categories.some(function (c) { return c.name === 'News'; }), 'categories from group-title');
 assert(!!stA.activePlaylistId, 'import sets active playlist');
+assert(sb1.ElionPlaylists.getLibraryPhase() === 'ready', 'successful import uses the full dashboard phase');
+var kept = sb1.ElionPlaylists.getState().playlists.length;
+var badImport = sb1.ElionPlaylists.importFromText('this is not a playlist', { name: 'Bad' });
+assert(!badImport.ok, 'failed import is rejected');
+assert(sb1.ElionPlaylists.getState().playlists.length === kept, 'failed import does not delete existing playlists');
+assert(sb1.ElionPlaylists.getState().activePlaylistId === stA.activePlaylistId, 'failed import does not change the active playlist');
 
 var rB = sb1.ElionPlaylists.importFromText(m3uB, { name: 'Beta', sourceType: 'paste' });
 assert(rB.ok && rB.channelCount === 1, 'import playlist B (1 channel)');
@@ -184,6 +193,15 @@ assert(!stDel.allChannels.some(function (c) { return c.playlistId === betaId; })
 sb2.ElionPlaylists.removePlaylist(stDel.playlists[0].id);
 var stEmpty = sb2.ElionPlaylists.getState();
 assert(stEmpty.playlists.length === 0 && stEmpty.channelCount === 0, 'delete last playlist returns to empty library');
+assert(sb2.ElionPlaylists.getLibraryPhase() === 'none', 'removing the last playlist returns to the welcome state');
+
+var sbEmpty = createSandbox(makeStorage());
+loadAll(sbEmpty);
+sbEmpty.ElionStorage.savePlaylists([{ id: 'blank', name: 'Blank', sourceType: 'paste', url: '', channelCount: 0, updatedAt: 1, createdAt: 1 }]);
+sbEmpty.ElionStorage.saveChannels([]);
+sbEmpty.ElionStorage.saveSettings({ activePlaylistId: 'blank' });
+sbEmpty.ElionPlaylists.loadFromStorage();
+assert(sbEmpty.ElionPlaylists.getLibraryPhase() === 'empty', 'saved playlist with no channels is not a populated dashboard');
 
 // Confirm screens require confirmation dialog for delete
 assert(/confirmDialog\([\s\S]*Remove|\bdelete\b/i.test(welcomeSrc), 'UI asks confirmation before delete');

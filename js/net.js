@@ -124,7 +124,7 @@
       attempt++;
       return Promise.resolve().then(fn).catch(function (err) {
         var msg = err && err.message ? err.message : String(err || '');
-        var fatal = /Invalid http|invalid url|HTTP 40[134]|not a valid|does not look like|No internet/i.test(msg);
+        var fatal = /superseded|Invalid http|invalid url|HTTP 40[134]|not a valid|does not look like|No internet/i.test(msg);
         var offlineNow = !isOnline();
         // attempts: initial + retries (retries=2 → up to 3 tries)
         if (fatal || attempt > retries || (offlineNow && attempt >= 1)) {

@@ -3,7 +3,20 @@
 
   var playerUiTimer = null;
   var clockTimer = null;
+  var epgRefreshTimer = null;
+
+  function refreshEpgIfEnabled() {
+    var settings = ElionStorage.getSettings();
+    if (!settings.epgAutoRefresh) return;
+    var url = settings.epgSourceUrl || '';
+    if (!url || url.indexOf('http') !== 0) return;
+    ElionEPG.loadFromUrl(url).catch(function () { /* keep the previous guide */ });
+  }
   var booted = false;
+  var bootFinished = false;
+  var messages = [];
+  var overlayReturn = null;
+  var lastPlaybackError = '';
   var titles = {
     home: 'Home',
     live: 'Live TV',
@@ -50,6 +63,8 @@
   }
 
   function finishBoot() {
+    if (bootFinished) return;
+    bootFinished = true;
     safe(function () { ElionScreens.navigate('home'); }, 'navigate home');
     setTimeout(function () {
       hideSplash();
@@ -72,12 +87,24 @@
     safe(function () { ElionPlayer.bindVideo(document.getElementById('playerVideo')); }, 'player bind');
 
     safe(wireNav, 'wire nav');
+    safe(wireHeader, 'wire header');
     safe(wirePlayerChrome, 'wire player');
     safe(updateClock, 'clock');
     if (clockTimer) clearInterval(clockTimer);
     clockTimer = setInterval(function () {
       safe(updateClock, 'clock tick');
-    }, 15000);
+    }, 1000);
+    if (epgRefreshTimer) clearInterval(epgRefreshTimer);
+    epgRefreshTimer = setInterval(function () {
+      safe(refreshEpgIfEnabled, 'epg refresh');
+    }, 6 * 60 * 60 * 1000);
+    setTimeout(function () {
+      if (!bootFinished) {
+        var status = document.getElementById('splashStatus');
+        if (status) status.textContent = 'Opening ELION IPTV…';
+        finishBoot();
+      }
+    }, 8000);
 
     safe(function () {
       ElionPlaylists.onChange(function () {
@@ -98,6 +125,7 @@
     var ready = ElionStorage.ready ? ElionStorage.ready() : Promise.resolve();
     ready.then(function () {
       safe(function () { ElionPlaylists.loadFromStorage(); }, 'load playlists');
+      safe(function () { loadMessages(); renderMessages(); }, 'load messages');
       safe(function () {
         var warnings = ElionStorage.getWarnings();
         if (warnings.length) ElionUI.toast('Recovered from storage issue');
@@ -107,6 +135,7 @@
       ElionLog.error('Boot storage failed', err && err.message);
       // Keep going with whatever is in memory / localStorage — never wipe user data
       safe(function () { ElionPlaylists.loadFromStorage(); }, 'load playlists fallback');
+      safe(function () { loadMessages(); renderMessages(); }, 'load messages fallback');
       finishBoot();
     });
   }
@@ -161,13 +190,221 @@
 
   function updateClock() {
     var el = document.getElementById('clock');
-    if (el) el.textContent = ElionUtils.formatClock();
+    var dateEl = document.getElementById('headerDate');
+    var d = new Date();
+    var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+    var settings = {};
+    try { settings = ElionStorage.getSettings() || {}; } catch (e) { settings = {}; }
+    var hours = d.getHours();
+    var timeText;
+    if (settings.clockFormat === '12') {
+      var suffix = hours >= 12 ? 'PM' : 'AM';
+      var h = hours % 12;
+      if (h === 0) h = 12;
+      timeText = h + ':' + pad(d.getMinutes()) + ' ' + suffix;
+    } else {
+      timeText = pad(hours) + ':' + pad(d.getMinutes());
+    }
+    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var dateText = days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+    if (el && el.textContent !== timeText) el.textContent = timeText;
+    if (dateEl && dateEl.textContent !== dateText) dateEl.textContent = dateText;
+    updatePlayerClock(timeText);
+  }
+
+  function updatePlayerClock(wallTime) {
+    var el = document.getElementById('playerClock');
+    var screen = document.getElementById('playerScreen');
+    if (!el || !screen || !screen.classList.contains('active')) return;
+    var text = wallTime || '';
+    try {
+      var video = ElionPlayer.getVideo();
+      if (video && isFinite(video.duration) && video.duration > 1 && video.duration < 86400) {
+        text = ElionUtils.formatDuration(video.currentTime) + ' / ' + ElionUtils.formatDuration(video.duration);
+      }
+    } catch (e) { /* keep the wall clock */ }
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  function setPlayerStatus(text) {
+    var el = document.getElementById('playerStatus');
+    if (el && el.textContent !== text) el.textContent = text;
+  }
+
+  function unreadCount() {
+    var n = 0;
+    for (var i = 0; i < messages.length; i++) {
+      if (!messages[i].read) n++;
+    }
+    return n;
+  }
+
+  function persistMessages() {
+    try { ElionStorage.set('messages', messages); } catch (e) { /* keep the in-memory list */ }
+  }
+
+  function loadMessages() {
+    var saved = [];
+    try { saved = ElionStorage.get('messages', []) || []; } catch (e) { saved = []; }
+    if (!Array.isArray(saved)) saved = [];
+    messages = [];
+    for (var i = 0; i < saved.length && messages.length < 40; i++) {
+      var item = saved[i];
+      if (!item || !item.title) continue;
+      messages.push({
+        id: item.id || ElionUtils.uid('msg'),
+        title: String(item.title),
+        body: String(item.body || ''),
+        when: String(item.when || ''),
+        at: Number(item.at) || 0,
+        read: !!item.read
+      });
+    }
+  }
+
+  function renderMessages() {
+    var body = document.getElementById('messagesBody');
+    var badge = document.getElementById('messageBadge');
+    var unread = unreadCount();
+    if (badge) {
+      if (unread > 0) {
+        badge.hidden = false;
+        badge.textContent = String(unread);
+      } else {
+        badge.hidden = true;
+        badge.textContent = '0';
+      }
+    }
+    if (!body) return;
+    if (!messages.length) {
+      body.innerHTML = '<div class="empty-state"><h3>No messages</h3><p>Playlist refresh results and playback notices will appear here.</p></div>';
+      return;
+    }
+    body.innerHTML = messages.map(function (m) {
+      return '<article class="message-item' + (m.read ? '' : ' is-unread') + '"><h3>' + ElionUtils.escapeHtml(m.title) + '</h3><p>' + ElionUtils.escapeHtml(m.body) + '</p><time>' + ElionUtils.escapeHtml(m.when) + '</time></article>';
+    }).join('');
+  }
+
+  function addMessage(title, body) {
+    title = title || 'Notice';
+    body = body || '';
+    var now = Date.now();
+    if (messages.length && messages[0].title === title && messages[0].body === body && (now - (messages[0].at || 0)) < 5000) {
+      return messages[0];
+    }
+    messages.unshift({
+      id: ElionUtils.uid('msg'),
+      title: title,
+      body: body,
+      when: new Date().toLocaleString(),
+      at: now,
+      read: false
+    });
+    if (messages.length > 40) messages.length = 40;
+    persistMessages();
+    renderMessages();
+    return messages[0];
+  }
+
+  function markAllMessagesRead() {
+    var changed = false;
+    for (var i = 0; i < messages.length; i++) {
+      if (!messages[i].read) {
+        messages[i].read = true;
+        changed = true;
+      }
+    }
+    if (changed) persistMessages();
+    renderMessages();
+  }
+
+  function openOverlay(id) {
+    var panel = document.getElementById(id);
+    if (!panel) return false;
+    overlayReturn = document.activeElement;
+    panel.classList.add('active');
+    panel.setAttribute('aria-hidden', 'false');
+    if (id === 'messagesPanel' && panel.classList.contains('active')) markAllMessagesRead();
+    setTimeout(function () {
+      var btn = panel.querySelector('[data-focusable]');
+      if (btn) ElionFocus.focusEl(btn);
+    }, 30);
+    return true;
+  }
+
+  function closeOverlay(id) {
+    var panel = document.getElementById(id);
+    if (!panel || !panel.classList.contains('active')) return false;
+    panel.classList.remove('active');
+    panel.setAttribute('aria-hidden', 'true');
+    var back = overlayReturn;
+    overlayReturn = null;
+    setTimeout(function () {
+      if (back && ElionFocus.isFocusable && ElionFocus.isFocusable(back)) ElionFocus.focusEl(back);
+      else ElionFocus.focusFirst(document.getElementById('content'));
+    }, 30);
+    return true;
+  }
+
+  function anyOverlayOpen() {
+    var messagesPanel = document.getElementById('messagesPanel');
+    var helpPanel = document.getElementById('helpPanel');
+    return (messagesPanel && messagesPanel.classList.contains('active')) ||
+      (helpPanel && helpPanel.classList.contains('active'));
+  }
+
+  function exitApplication() {
+    ElionUI.showModal({
+      title: 'Exit',
+      message: 'Do you really want to exit ELION IPTV?',
+      okText: 'YES',
+      cancelText: 'NO'
+    }).then(function (result) {
+      if (!result || !result.ok) return;
+      try {
+        if (window.webOS && typeof webOS.platformBack === 'function') {
+          webOS.platformBack();
+          return;
+        }
+      } catch (e) { /* try the next supported exit */ }
+      try {
+        if (window.PalmSystem && typeof PalmSystem.exit === 'function') {
+          PalmSystem.exit();
+          return;
+        }
+      } catch (e2) { /* explain below */ }
+      ElionUI.toast('This device did not close the app. Use the Home button on the remote to leave ELION IPTV.');
+    });
+  }
+
+  function wireHeader() {
+    function bind(id, fn) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('click', function () {
+        try { fn(); } catch (err) {
+          ElionLog.warn('header action failed', id, err && err.message);
+        }
+      });
+    }
+    bind('btnReload', function () {
+      if (ElionScreens.reloadActivePlaylist) ElionScreens.reloadActivePlaylist();
+    });
+    bind('btnMessages', function () { openOverlay('messagesPanel'); });
+    bind('btnCloseMessages', function () { closeOverlay('messagesPanel'); });
+    bind('btnSettings', function () { ElionScreens.navigate('settings'); });
+    bind('btnHelp', function () { openOverlay('helpPanel'); });
+    bind('btnCloseHelp', function () { closeOverlay('helpPanel'); });
+    bind('btnExit', exitApplication);
+    renderMessages();
   }
 
   var lastPlayedChannelId = null;
   var zapLockedUntil = 0;
   var zapOsdTimer = null;
   var channelListOpen = false;
+  var categoryListOpen = false;
   var channelListRestoreFocus = null;
   var ZAP_COOLDOWN_MS = 420;
   var ZAP_OSD_MS = 2800;
@@ -230,6 +467,19 @@
     return !!channelListOpen;
   }
 
+  function isPlayerCategoryOpen() {
+    return !!categoryListOpen;
+  }
+
+  function closePlayerCategoryList() {
+    var list = document.getElementById('playerCategoryList');
+    categoryListOpen = false;
+    if (list) {
+      list.classList.remove('active');
+      list.setAttribute('aria-hidden', 'true');
+    }
+  }
+
   function closePlayerChannelList() {
     var list = document.getElementById('playerChannelList');
     var screen = document.getElementById('playerScreen');
@@ -252,6 +502,44 @@
     channelListRestoreFocus = null;
   }
 
+  function openPlayerCategoryList() {
+    var list = document.getElementById('playerCategoryList');
+    var body = document.getElementById('playerCategoryListBody');
+    if (!list || !body) return;
+    closePlayerChannelList();
+    var state = ElionPlaylists.getState();
+    var hidden = {};
+    try {
+      (ElionStorage.getSettings().hiddenGroups || []).forEach(function (name) { hidden[name] = true; });
+    } catch (eHide) { hidden = {}; }
+    var cats = (state.categories || []).filter(function (c) { return c && !hidden[c.name]; });
+    var html = '<button class="player-channel-list-item" data-focusable data-action="player-category" data-group="" type="button"><span class="pcl-name">All channels</span></button>';
+    html += cats.map(function (c) {
+      var label = c.name || 'Uncategorized';
+      return '<button class="player-channel-list-item" data-focusable data-action="player-category" data-group="' + ElionUtils.escapeHtml(c.name) + '" type="button"><span class="pcl-name">' + ElionUtils.escapeHtml(label) + ' (' + c.count + ')</span></button>';
+    }).join('');
+    body.innerHTML = html || '<div class="empty-state"><p>No categories in this playlist.</p></div>';
+    body.querySelectorAll('[data-action="player-category"]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var group = btn.getAttribute('data-group');
+        var channels = group
+          ? ElionChannels.sortChannels(ElionPlaylists.getChannelsByGroup(group), 'playlist')
+          : ElionChannels.getSortedAll();
+        if (channels.length) ElionChannels.setBrowseList(channels, group ? ('category:' + group) : 'playlist');
+        closePlayerCategoryList();
+        openPlayerChannelList();
+      });
+    });
+    categoryListOpen = true;
+    list.classList.add('active');
+    list.setAttribute('aria-hidden', 'false');
+    bumpPlayerUi();
+    setTimeout(function () {
+      var first = body.querySelector('.player-channel-list-item') || document.getElementById('btnCloseCategories');
+      if (first) ElionFocus.focusEl(first);
+    }, 40);
+  }
+
   function openPlayerChannelList() {
     var list = document.getElementById('playerChannelList');
     var body = document.getElementById('playerChannelListBody');
@@ -266,9 +554,19 @@
       if (!channels.length) channels = ElionChannels.getSortedAll();
       var current = ElionPlayer.getCurrentChannel();
       var currentId = current && current.id;
+      var listStart = 0;
+      if (channels.length > 120) {
+        var at = 0;
+        for (var ci = 0; ci < channels.length; ci++) {
+          if (channels[ci] && channels[ci].id === currentId) { at = ci; break; }
+        }
+        listStart = Math.max(0, at - 40);
+        if (listStart + 120 > channels.length) listStart = Math.max(0, channels.length - 120);
+        channels = channels.slice(listStart, listStart + 120);
+      }
       body.innerHTML = channels.map(function (ch, idx) {
         var active = currentId && ch.id === currentId ? ' is-current' : '';
-        var num = ch.number != null && ch.number !== '' ? ('<span class="pcl-num">' + ElionUtils.escapeHtml(String(ch.number)) + '</span>') : '<span class="pcl-num">' + (idx + 1) + '</span>';
+        var num = ch.number != null && ch.number !== '' ? ('<span class="pcl-num">' + ElionUtils.escapeHtml(String(ch.number)) + '</span>') : '<span class="pcl-num">' + (listStart + idx + 1) + '</span>';
         return (
           '<button class="player-channel-list-item' + active + '" data-focusable data-action="play-from-list" data-id="' + ElionUtils.escapeHtml(ch.id) + '" type="button">' +
             num +
@@ -320,6 +618,7 @@
       lastPlayedChannelId = channel.id || null;
       ensureZapBrowseContext(channel);
       closePlayerChannelList();
+      closePlayerCategoryList();
       hideChannelZapOsd();
       try {
         if (document.activeElement) ElionFocus.remember(document.activeElement);
@@ -416,6 +715,7 @@
       if (cur && cur.id) restoreId = cur.id;
     } catch (e0) { /* ignore */ }
     closePlayerChannelList();
+    closePlayerCategoryList();
     hideChannelZapOsd();
     try {
       ElionPlayer.stop();
@@ -436,6 +736,9 @@
     if (!screen) return;
     screen.classList.add('show-ui');
     clearTimeout(playerUiTimer);
+    try {
+      if (ElionStorage.getSettings().playerControlsPinned) return;
+    } catch (ePin) { /* keep the auto-hide timer */ }
     playerUiTimer = setTimeout(function () {
       try {
         if (ElionPlayer.getStatus().playing && !ElionPlayer.getStatus().error) {
@@ -460,6 +763,50 @@
    * One physical press → one change; key-repeat / rapid presses are ignored.
    * Works with the control bar visible or hidden.
    */
+  function playableChannel(ch) {
+    if (!ch || !ch.url) return false;
+    var url = String(ch.url).trim();
+    if (!url || /^(javascript|data):/i.test(url)) return false;
+    return true;
+  }
+
+  function resolveZapTarget(current, delta) {
+    var startId = current && current.id;
+    var cursor = startId;
+    var seen = {};
+    var steps = 0;
+    var maxSteps = 80;
+    try {
+      var listed = ElionChannels.getBrowseList().length;
+      if (listed > maxSteps) maxSteps = Math.min(listed, 400);
+    } catch (eMax) { /* keep the default cap */ }
+    while (steps < maxSteps) {
+      var target = null;
+      try {
+        target = delta < 0
+          ? ElionChannels.prevChannel(cursor)
+          : ElionChannels.nextChannel(cursor);
+      } catch (eStep) {
+        return null;
+      }
+      if (!target || !target.id || seen[target.id]) return null;
+      seen[target.id] = true;
+      if (startId && target.id === startId) return target;
+      if (playableChannel(target)) return target;
+      cursor = target.id;
+      steps++;
+    }
+    return null;
+  }
+
+  /** CH+ / CH−. Closes an open list, then uses the same step as Up and Down. */
+  function playerChannelKey(delta) {
+    if (!isPlayerActive()) return Promise.resolve(false);
+    if (categoryListOpen) closePlayerCategoryList();
+    if (channelListOpen) closePlayerChannelList();
+    return playerChannelStep(delta);
+  }
+
   function playerChannelStep(delta) {
     var now = Date.now();
     if (now < zapLockedUntil) return Promise.resolve(false);
@@ -474,9 +821,7 @@
 
     var target = null;
     try {
-      target = delta < 0
-        ? ElionChannels.prevChannel(current && current.id)
-        : ElionChannels.nextChannel(current && current.id);
+      target = resolveZapTarget(current, delta);
     } catch (e1) {
       ElionLog.warn('channel step resolve failed', e1 && e1.message);
     }
@@ -524,14 +869,30 @@
       try {
         var buf = document.getElementById('playerBuffering');
         var errBox = document.getElementById('playerErrorBox');
+        var errTitle = document.getElementById('playerErrorTitle');
         var errText = document.getElementById('playerErrorText');
-        if (buf) buf.classList.toggle('active', !!st.buffering && !st.error);
+        if (buf) {
+          buf.classList.toggle('active', !!st.buffering && !st.error);
+          buf.textContent = (st.recovering && st.recoveryDetail) ? st.recoveryDetail : 'Loading channel…';
+        }
+        if (st.error) setPlayerStatus(st.errorTitle || 'Playback error');
+        else if (st.recovering) setPlayerStatus(st.errorTitle || 'Reconnecting');
+        else if (st.buffering) setPlayerStatus('Loading');
+        else if (st.paused) setPlayerStatus('Paused');
+        else if (st.playing) setPlayerStatus('Playing');
+        updatePlayerClock();
         if (errBox) {
           if (st.error) {
             errBox.style.display = 'block';
+            if (errTitle) errTitle.textContent = st.errorTitle || 'Playback error';
             if (errText) errText.textContent = st.error;
+            if (st.error !== lastPlaybackError) {
+              lastPlaybackError = st.error;
+              addMessage('Playback error', st.error);
+            }
           } else {
             errBox.style.display = 'none';
+            lastPlaybackError = '';
           }
         }
         updatePlayPauseButton(!!st.paused);
@@ -571,10 +932,64 @@
     bind('btnPrev', function () { playerChannelStep(-1); });
     bind('btnNext', function () { playerChannelStep(1); });
     bind('btnChannelList', function () {
+      closePlayerCategoryList();
       if (channelListOpen) closePlayerChannelList();
       else openPlayerChannelList();
     });
+    bind('btnCategories', function () {
+      if (categoryListOpen) closePlayerCategoryList();
+      else openPlayerCategoryList();
+    });
     bind('btnCloseChannelList', closePlayerChannelList);
+    bind('btnCloseCategories', closePlayerCategoryList);
+    bind('btnFav', function () {
+      var ch = ElionPlayer.getCurrentChannel();
+      if (!ch) return;
+      var on = ElionFavorites.toggle(ch.id);
+      updateFavButton(ch);
+      ElionUI.toast(on ? 'Added to favorites' : 'Removed from favorites');
+      bumpPlayerUi();
+    });
+    bind('btnMute', function () {
+      var video = ElionPlayer.getVideo();
+      if (!video) return;
+      video.muted = !video.muted;
+      var btn = document.getElementById('btnMute');
+      var label = btn && btn.parentNode ? btn.parentNode.querySelector('.ctrl-label') : null;
+      if (btn) {
+        btn.classList.toggle('is-muted', video.muted);
+        btn.setAttribute('aria-label', video.muted ? 'Unmute' : 'Mute');
+        btn.setAttribute('title', video.muted ? 'Unmute' : 'Mute');
+      }
+      if (label) label.textContent = video.muted ? 'Unmute' : 'Mute';
+      bumpPlayerUi();
+    });
+    bind('btnFullscreen', function () {
+      var screen = document.getElementById('playerScreen');
+      if (!screen) return;
+      var active = document.fullscreenElement || document.webkitFullscreenElement;
+      if (active) {
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) exit.call(document);
+        return;
+      }
+      var req = screen.requestFullscreen || screen.webkitRequestFullscreen;
+      if (!req) {
+        ElionUI.toast('The player already fills the TV screen.');
+        return;
+      }
+      try {
+        var pending = req.call(screen);
+        if (pending && pending.catch) {
+          pending.catch(function () {
+            ElionUI.toast('The player already fills the TV screen.');
+          });
+        }
+      } catch (e) {
+        ElionUI.toast('The player already fills the TV screen.');
+      }
+      bumpPlayerUi();
+    });
     bind('btnErrorRetry', function () { ElionPlayer.retry().catch(function () {}); bumpPlayerUi(); });
     bind('btnErrorNext', function () { playerChannelStep(1); });
     bind('btnErrorBack', closePlayer);
@@ -597,6 +1012,9 @@
 
   function handleBack() {
     try {
+      if (closeOverlay('helpPanel')) return;
+      if (closeOverlay('messagesPanel')) return;
+
       var modal = document.getElementById('modalHost');
       if (modal && modal.classList.contains('active')) {
         var cancel = document.getElementById('modalCancel') || document.getElementById('modalOk');
@@ -607,6 +1025,10 @@
       var player = document.getElementById('playerScreen');
       if (player && player.classList.contains('active')) {
         // In-player channel list: first Back closes the list, second exits player.
+        if (categoryListOpen) {
+          closePlayerCategoryList();
+          return;
+        }
         if (channelListOpen) {
           closePlayerChannelList();
           return;
@@ -617,29 +1039,9 @@
       }
 
       var cur = ElionScreens.getCurrent();
-      if (cur.name === 'category') {
-        ElionScreens.navigate('categories');
-        return;
-      }
-      if (cur.name === 'settings' && cur.settingsTab && cur.settingsTab !== 'general') {
-        ElionScreens.navigate('settings', { tab: 'general' });
-        return;
-      }
-      if (moreScreens[cur.name] && cur.name !== 'more' && cur.name !== 'home') {
-        ElionScreens.navigate('more');
-        return;
-      }
-      if (cur.name === 'more') {
-        ElionScreens.navigate('home');
-        return;
-      }
-      if (cur.name !== 'home') {
-        ElionScreens.navigate('home');
-        return;
-      }
-
-      if (window.webOS && webOS.platformBack) webOS.platformBack();
-      else if (window.close) window.close();
+      if (!cur || cur.name === 'home') return;
+      if (ElionScreens.goBack) ElionScreens.goBack();
+      else ElionScreens.navigate('home');
     } catch (e) {
       ElionLog.warn('handleBack failed', e && e.message);
       try { ElionScreens.navigate('home'); } catch (e2) { /* ignore */ }
@@ -651,11 +1053,15 @@
     closePlayer: closePlayer,
     handleBack: handleBack,
     updateChrome: updateChrome,
+    updateClock: updateClock,
+    addMessage: addMessage,
     playerChannelStep: playerChannelStep,
+    playerChannelKey: playerChannelKey,
     playerOkAction: playerOkAction,
     isPlayerActive: isPlayerActive,
     isPlayerUiVisible: isPlayerUiVisible,
     isPlayerChannelListOpen: isPlayerChannelListOpen,
+    isPlayerCategoryOpen: isPlayerCategoryOpen,
     openPlayerChannelList: openPlayerChannelList,
     closePlayerChannelList: closePlayerChannelList,
     showChannelZapOsd: showChannelZapOsd,

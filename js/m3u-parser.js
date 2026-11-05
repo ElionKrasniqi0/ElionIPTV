@@ -82,6 +82,23 @@
     return u;
   }
 
+  function rememberCategory(order, map, name) {
+    var key = name || 'Uncategorized';
+    if (map[key] == null) {
+      map[key] = 0;
+      order.push(key);
+    }
+    map[key]++;
+  }
+
+  function categoriesInOrder(order, map) {
+    var out = [];
+    for (var i = 0; i < order.length; i++) {
+      out.push({ name: order[i], count: map[order[i]] });
+    }
+    return out;
+  }
+
   function sanitizeLogoUrl(url) {
     var u = ElionUtils.normalizeUrl(url);
     if (!u) return '';
@@ -145,6 +162,7 @@
     var channels = [];
     var seenUrls = Object.create(null);
     var categoryMap = Object.create(null);
+    var categoryOrder = [];
     var started = false;
 
     for (var i = 0; i < lines.length; i++) {
@@ -172,7 +190,7 @@
         }
         if (/^#EXTGRP:/i.test(line)) {
           pendingGroup = line.replace(/^#EXTGRP:/i, '').trim();
-          if (pending) pending.group = pendingGroup;
+          if (pending && !(pending.attrs && pending.attrs['group-title'])) pending.group = pendingGroup;
           continue;
         }
         if (/^#EXTVLCOPT:/i.test(line) || /^#EXT-X-/i.test(line) || /^#PLAYLIST:/i.test(line)) {
@@ -213,7 +231,7 @@
         } else {
           seenUrls[channel.url] = true;
           channels.push(channel);
-          categoryMap[channel.group] = (categoryMap[channel.group] || 0) + 1;
+          rememberCategory(categoryOrder, categoryMap, channel.group);
         }
 
         pending = null;
@@ -241,11 +259,7 @@
       return result;
     }
 
-    var categories = Object.keys(categoryMap).sort(function (a, b) {
-      return a.localeCompare(b);
-    }).map(function (name) {
-      return { name: name, count: categoryMap[name] };
-    });
+    var categories = categoriesInOrder(categoryOrder, categoryMap);
 
     result.ok = true;
     result.channels = channels;
@@ -289,6 +303,7 @@
       var channels = [];
       var seenUrls = Object.create(null);
       var categoryMap = Object.create(null);
+      var categoryOrder = [];
       var started = false;
       var i = 0;
       var CHUNK = 800;
@@ -307,9 +322,7 @@
         }
         result.ok = true;
         result.channels = channels;
-        result.categories = Object.keys(categoryMap).sort().map(function (name) {
-          return { name: name, count: categoryMap[name] };
-        });
+        result.categories = categoriesInOrder(categoryOrder, categoryMap);
         resolve(result);
       }
 
@@ -336,7 +349,7 @@
             }
             if (/^#EXTGRP:/i.test(line)) {
               pendingGroup = line.replace(/^#EXTGRP:/i, '').trim();
-              if (pending) pending.group = pendingGroup;
+              if (pending && !(pending.attrs && pending.attrs['group-title'])) pending.group = pendingGroup;
               continue;
             }
             continue;
@@ -354,7 +367,7 @@
             if (channel.url && !(seenUrls[channel.url] && options.skipDuplicates !== false)) {
               seenUrls[channel.url] = true;
               channels.push(channel);
-              categoryMap[channel.group] = (categoryMap[channel.group] || 0) + 1;
+              rememberCategory(categoryOrder, categoryMap, channel.group);
             } else if (channel.url) {
               result.warnings.push('Duplicate URL skipped: ' + channel.name);
             }

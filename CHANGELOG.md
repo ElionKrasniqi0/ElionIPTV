@@ -10,6 +10,10 @@ Status words:
 - **REPORTED** — described in development notes; not re-proven from a commit message.
 - **NEEDS REAL-TV TESTING** — not confirmed on the LG set by an automated test.
 
+## v1.1.0 — current source
+
+**IMPLEMENTED, NEEDS REAL-TV TESTING.** Television home with six destinations (Live TV, Movies, Series, Live with EPG, Add Playlist, Favorites), persistent header (clock, date, reload, messages, settings, help, exit confirmation), and category-first Live TV. Playlist parsing, favorites, and the single video player are unchanged. Not verified on a physical LG TV.
+
 ## v1.0.0 — package `dist/com.elion.iptv_1.0.0_all.ipk` (00:15)
 
 **REPORTED.** First packaged webOS app: HTML shell, M3U import, channel lists, HTML5 player, settings, Magic Remote focus, splash and icons. Exact commit contents are not in git.

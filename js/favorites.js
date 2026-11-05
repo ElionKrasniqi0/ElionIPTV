@@ -2,7 +2,15 @@
   'use strict';
 
   function getIds() {
-    return ElionStorage.getFavorites() || [];
+    var raw = ElionStorage.getFavorites() || [];
+    var seen = Object.create(null);
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      if (!raw[i] || seen[raw[i]]) continue;
+      seen[raw[i]] = true;
+      out.push(raw[i]);
+    }
+    return out;
   }
 
   function isFavorite(channelId) {

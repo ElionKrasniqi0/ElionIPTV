@@ -18,7 +18,7 @@ Official references:
 | Title | ELION IPTV |
 | Type | `web` |
 | Main | `index.html` |
-| Version | `1.0.0` |
+| Version | `1.1.0` |
 | Resolution | `1920x1080` |
 | Back key | `disableBackHistoryAPI: true` (app handles Back) |
 
@@ -95,7 +95,7 @@ ares-package . -o dist -n ^
 Expected output:
 
 ```text
-dist/com.elion.iptv_1.0.0_all.ipk
+dist/com.elion.iptv_1.1.0_all.ipk
 ```
 
 `-n` skips minify (easier debugging). Remove `-n` for smaller packages after you are stable.
@@ -103,7 +103,7 @@ dist/com.elion.iptv_1.0.0_all.ipk
 ## 6. Install & launch
 
 ```bash
-ares-install --device lgqned dist/com.elion.iptv_1.0.0_all.ipk
+ares-install --device lgqned dist/com.elion.iptv_1.1.0_all.ipk
 ares-launch --device lgqned com.elion.iptv
 ```
 

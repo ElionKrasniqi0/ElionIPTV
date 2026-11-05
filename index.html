@@ -4,40 +4,54 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ELION IPTV</title>
+  <link rel="preload" href="assets/images/splash-screen.webp" as="image">
+  <link rel="preload" href="assets/images/elion-iptv-logo.png" as="image">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
   <div id="app">
-    <div id="splash" class="splash-boot" aria-hidden="true"></div>
+    <div id="splash" class="splash-boot" role="status" aria-label="ELION IPTV is starting">
+      <div class="splash-inner">
+        <img class="app-logo app-logo-splash" src="assets/images/splash-screen.webp" alt="ELION IPTV">
+        <p id="splashStatus">Starting…</p>
+      </div>
+    </div>
 
     <div class="app-shell" id="shell">
-      <nav class="side-nav" aria-label="Main">
+      <header class="app-header">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true"></div>
-          <div>
-            <h1>ELION</h1>
-            <span>IPTV</span>
-          </div>
+          <img class="app-logo app-logo-header" src="assets/images/elion-iptv-logo.png" alt="ELION IPTV">
         </div>
-
-        <button class="nav-item active" data-focusable data-nav="home"><span class="icon">⌂</span> Home</button>
-        <button class="nav-item" data-focusable data-nav="live"><span class="icon">▶</span> Live TV</button>
-        <button class="nav-item" data-focusable data-nav="channels"><span class="icon">☰</span> All Channels</button>
-        <button class="nav-item" data-focusable data-nav="categories"><span class="icon">▦</span> Categories</button>
-        <button class="nav-item" data-focusable data-nav="favorites"><span class="icon">★</span> Favorites</button>
-        <button class="nav-item" data-focusable data-nav="more"><span class="icon">⋯</span> More</button>
-
-        <div class="nav-footer">Use the remote arrows and OK</div>
-      </nav>
+        <div class="header-tools">
+          <div class="header-clock" aria-live="off">
+            <span id="clock">--:--</span>
+            <span id="headerDate"></span>
+          </div>
+          <button id="btnReload" class="header-btn" data-focusable type="button" title="Reload IPTV" aria-label="Reload IPTV">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M38 24a14 14 0 1 1-4.1-9.9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M34 8h8v8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Reload</span>
+          </button>
+          <button id="btnMessages" class="header-btn" data-focusable type="button" title="Messages" aria-label="Messages">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 12h32v22H18l-10 8V12z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>
+            <span>Messages</span>
+            <em id="messageBadge" class="header-badge" hidden>0</em>
+          </button>
+          <button id="btnSettings" class="header-btn" data-focusable type="button" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="6" fill="none" stroke="currentColor" stroke-width="3"/><path d="M24 6v5M24 37v5M6 24h5M37 24h5M11 11l3.5 3.5M33.5 33.5L37 37M37 11l-3.5 3.5M14.5 33.5L11 37" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+            <span>Settings</span>
+          </button>
+          <button id="btnHelp" class="header-btn" data-focusable type="button" title="Help" aria-label="Help">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="16" fill="none" stroke="currentColor" stroke-width="3"/><path d="M18 19a6 6 0 1 1 8 5.6c-1.2.7-2 1.6-2 3.4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="24" cy="34" r="1.8" fill="currentColor"/></svg>
+            <span>Help</span>
+          </button>
+          <button id="btnExit" class="header-btn header-btn-exit" data-focusable type="button" title="Exit" aria-label="Exit">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M14 14l20 20M34 14L14 34" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+            <span>Exit</span>
+          </button>
+        </div>
+      </header>
 
       <main class="main-stage">
-        <header class="topbar">
-          <h2 id="screenTitle">Home</h2>
-          <div class="topbar-meta">
-            <span class="chip" id="channelCountChip">0 ch</span>
-            <span id="clock">--:--</span>
-          </div>
-        </header>
         <div class="loading-bar" id="globalLoading"><span></span></div>
         <section class="content" id="content" tabindex="-1"></section>
       </main>
@@ -60,7 +74,7 @@
       </div>
 
       <div id="playerErrorBox" class="player-error-box" style="display:none">
-        <h3>This channel could not be played</h3>
+        <h3 id="playerErrorTitle">Playback error</h3>
         <p id="playerErrorText">It may be temporarily unavailable. You can try again or choose another channel.</p>
         <div class="btn-row" style="justify-content:center">
           <button id="btnErrorRetry" class="primary" data-focusable>Try again</button>
@@ -69,7 +83,17 @@
         </div>
       </div>
 
-      <div id="playerChannelList" class="player-channel-list" aria-hidden="true">
+      <div id="playerCategoryList" class="player-channel-list" aria-hidden="true">
+      <div class="player-channel-list-panel">
+        <div class="player-channel-list-header">
+          <h3>Categories</h3>
+          <button id="btnCloseCategories" class="ghost" data-focusable type="button">Close</button>
+        </div>
+        <div id="playerCategoryListBody" class="player-channel-list-body"></div>
+      </div>
+    </div>
+
+    <div id="playerChannelList" class="player-channel-list" aria-hidden="true">
         <div class="player-channel-list-panel">
           <div class="player-channel-list-header">
             <h3>Channels</h3>
@@ -85,22 +109,41 @@
           <div>
             <div class="player-title" id="playerTitle">Channel</div>
             <div class="player-sub" id="playerSub"></div>
+            <div class="player-status-row">
+              <span id="playerStatus">Loading…</span>
+              <span id="playerClock"></span>
+            </div>
             <div class="player-info" id="playerInfo"></div>
           </div>
         </div>
         <nav class="player-control-bar" aria-label="Playback controls">
-          <div class="player-ctrl-item player-ctrl-item-category">
-            <button id="btnChannelList" class="player-ctrl" data-focusable type="button" title="Category" aria-label="Category">
-              <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 12h36M6 24h36M6 36h36" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
-            </button>
-            <span class="ctrl-label">Category</span>
+          <div class="player-ctrl-group player-ctrl-group-side" role="group" aria-label="Library">
+            <div class="player-ctrl-item">
+              <button id="btnChannelList" class="player-ctrl" data-focusable type="button" title="Channel list" aria-label="Channel list">
+                <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M8 12h10v10H8zM20 14h20M20 20h14M8 26h10v10H8zM20 28h20M20 34h14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <span class="ctrl-label">Channels</span>
+            </div>
+            <div class="player-ctrl-item">
+              <button id="btnCategories" class="player-ctrl" data-focusable type="button" title="Categories" aria-label="Categories">
+                <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 12h36M6 24h36M6 36h36" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
+              </button>
+              <span class="ctrl-label">Categories</span>
+            </div>
+            <div class="player-ctrl-item">
+              <button id="btnFav" class="player-ctrl" data-focusable type="button" title="Favorite" aria-label="Favorite">
+                <svg class="ctrl-svg icon-fav-off" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8l4.6 10.2L40 19.2l-8 7.4 2.2 11.2L24 32.8 13.8 37.8 16 26.6 8 19.2l11.4-1z" fill="none" stroke="currentColor" stroke-width="3"/></svg>
+                <svg class="ctrl-svg icon-fav-on" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8l4.6 10.2L40 19.2l-8 7.4 2.2 11.2L24 32.8 13.8 37.8 16 26.6 8 19.2l11.4-1z" fill="currentColor"/></svg>
+              </button>
+              <span class="ctrl-label">Favorite</span>
+            </div>
           </div>
           <div class="player-ctrl-group player-ctrl-group-center" role="group" aria-label="Playback">
             <div class="player-ctrl-item">
               <button id="btnPrev" class="player-ctrl" data-focusable type="button" title="Previous channel" aria-label="Previous Channel">
                 <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M22 10 L8 24 L22 38 M40 10 L26 24 L40 38" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg>
               </button>
-              <span class="ctrl-label">Previous Channel</span>
+              <span class="ctrl-label">Previous</span>
             </div>
             <div class="player-ctrl-item player-ctrl-item-primary">
               <button id="btnPlayPause" class="player-ctrl player-ctrl-primary" data-focusable type="button" title="Pause" aria-label="Pause">
@@ -113,10 +156,70 @@
               <button id="btnNext" class="player-ctrl" data-focusable type="button" title="Next channel" aria-label="Next Channel">
                 <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M8 10 L22 24 L8 38 M26 10 L40 24 L26 38" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg>
               </button>
-              <span class="ctrl-label">Next Channel</span>
+              <span class="ctrl-label">Next</span>
+            </div>
+          </div>
+          <div class="player-ctrl-group player-ctrl-group-side" role="group" aria-label="Sound and screen">
+            <div class="player-ctrl-item">
+              <button id="btnMute" class="player-ctrl" data-focusable type="button" title="Mute" aria-label="Mute">
+                <svg class="ctrl-svg icon-mute-off" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 18h8l10-8v28l-10-8h-8zM34 18a10 10 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/></svg>
+                <svg class="ctrl-svg icon-mute-on" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 18h8l10-8v28l-10-8h-8zM32 20l10 10M42 20L32 30" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/></svg>
+              </button>
+              <span class="ctrl-label">Mute</span>
+            </div>
+            <div class="player-ctrl-item">
+              <button id="btnFullscreen" class="player-ctrl" data-focusable type="button" title="Fullscreen" aria-label="Fullscreen">
+                <svg class="ctrl-svg" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 18V10h8M30 10h8v8M38 30v8h-8M18 38h-8v-8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <span class="ctrl-label">Fullscreen</span>
             </div>
           </div>
         </nav>
+      </div>
+    </div>
+
+    <div id="messagesPanel" class="overlay-panel" aria-hidden="true">
+      <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="messagesTitle">
+        <div class="overlay-head">
+          <h2 id="messagesTitle">Messages</h2>
+          <button id="btnCloseMessages" class="primary" data-focusable type="button">Close</button>
+        </div>
+        <div id="messagesBody" class="overlay-body"></div>
+      </div>
+    </div>
+
+    <div id="helpPanel" class="overlay-panel" aria-hidden="true">
+      <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <div class="overlay-head">
+          <h2 id="helpTitle">Help</h2>
+          <button id="btnCloseHelp" class="primary" data-focusable type="button">Close</button>
+        </div>
+        <div class="overlay-body help-body">
+          <section>
+            <h3>Add an M3U playlist</h3>
+            <p>Open Add Playlist. Paste a playlist address (http or https) or the playlist text itself. ELION only shows channels from the playlist you add.</p>
+          </section>
+          <section>
+            <h3>Live TV</h3>
+            <p>Choose a category, then a channel. All Channels lists every channel in the active playlist. Hold Down to move through long lists.</p>
+          </section>
+          <section>
+            <h3>Favorites</h3>
+            <p>Use the star beside a channel to save it. Open Favorites from the home screen to see only those channels.</p>
+          </section>
+          <section>
+            <h3>Video player</h3>
+            <p>OK shows the controls. Previous and Next change channel. Up and Down also change channel. CH+ and CH− do the same when the TV sends those buttons to the app. Back returns to the list. Playback depends on the stream and this TV.</p>
+          </section>
+          <section>
+            <h3>Refresh playlists</h3>
+            <p>Reload downloads the active playlist again when it was added from a web address. Favorites and settings stay. If the download fails, the channels already saved remain.</p>
+          </section>
+          <section>
+            <h3>Troubleshooting</h3>
+            <p>If a channel will not play, try the next channel or Reload. Check that the TV is online and that the playlist address is still valid. A pasted playlist has no address to refresh — add it again from Add Playlist. Codec and DRM support depend on the television.</p>
+          </section>
+        </div>
       </div>
     </div>
 

@@ -44,14 +44,14 @@
       var stop = parseXmltvTime(node.getAttribute('stop'));
       var titleNode = node.getElementsByTagName('title')[0];
       var descNode = node.getElementsByTagName('desc')[0];
-      var title = titleNode ? titleNode.textContent : 'Programme';
-      var desc = descNode ? descNode.textContent : '';
+      var title = titleNode && titleNode.textContent ? titleNode.textContent.trim() : '';
+      var desc = descNode && descNode.textContent ? descNode.textContent.trim() : '';
       if (!channel || !start) continue;
       if (!programmes[channel]) programmes[channel] = [];
       programmes[channel].push({
         channel: channel,
         start: start,
-        stop: stop || (start + 3600000),
+        stop: stop || 0,
         title: title,
         desc: desc
       });
@@ -109,32 +109,68 @@
     return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   }
 
-  function resolveEpgKey(channel, cache) {
-    cache = cache || ElionStorage.getEpgCache();
+  var lookup = null;
+  var lookupAt = -1;
+
+  function getLookup() {
+    var cache = ElionStorage.getEpgCache() || {};
+    var stamp = cache.updatedAt || 0;
+    if (lookup && lookupAt === stamp) return lookup;
+    lookupAt = stamp;
+    lookup = { byId: Object.create(null), byName: Object.create(null) };
     var programmes = cache.programmes || {};
-    if (channel.tvgId && programmes[channel.tvgId]) return channel.tvgId;
-
-    // Match display-name map from XMLTV <channel>
     var names = cache.channels || {};
-    var want = normalizeName(channel.name);
+    Object.keys(programmes).forEach(function (key) {
+      lookup.byId[key] = key;
+      var fromKey = normalizeName(key);
+      if (fromKey && !lookup.byName[fromKey]) lookup.byName[fromKey] = key;
+      var fromDisplay = normalizeName(names[key]);
+      if (fromDisplay && !lookup.byName[fromDisplay]) lookup.byName[fromDisplay] = key;
+    });
+    return lookup;
+  }
+
+  function resolveEpgKey(channel, cache) {
+    if (!channel) return null;
+    cache = cache || ElionStorage.getEpgCache();
+    var programmes = (cache && cache.programmes) || {};
+    if (channel.tvgId && programmes[channel.tvgId]) return channel.tvgId;
+    var index = getLookup();
+    if (channel.tvgId && index.byId[channel.tvgId]) return index.byId[channel.tvgId];
     var wantTvg = normalizeName(channel.tvgName || '');
-    var keys = Object.keys(names);
-    for (var i = 0; i < keys.length; i++) {
-      var n = normalizeName(names[keys[i]]);
-      if (n && (n === want || (wantTvg && n === wantTvg))) {
-        if (programmes[keys[i]]) return keys[i];
-      }
-    }
-
-    // Fallback: programme keys that equal channel name / tvg-name
+    if (wantTvg && index.byName[wantTvg]) return index.byName[wantTvg];
+    var want = normalizeName(channel.name);
+    if (want && index.byName[want]) return index.byName[want];
     if (channel.tvgName && programmes[channel.tvgName]) return channel.tvgName;
-    if (programmes[channel.name]) return channel.name;
-
-    var pkeys = Object.keys(programmes);
-    for (var j = 0; j < pkeys.length; j++) {
-      if (normalizeName(pkeys[j]) === want) return pkeys[j];
-    }
+    if (channel.name && programmes[channel.name]) return channel.name;
     return null;
+  }
+
+  function guideNow() {
+    var mins = 0;
+    try {
+      mins = parseInt(ElionStorage.getSettings().epgOffsetMinutes, 10);
+    } catch (e) { mins = 0; }
+    if (!isFinite(mins)) mins = 0;
+    if (mins > 720) mins = 720;
+    if (mins < -720) mins = -720;
+    return Date.now() + mins * 60000;
+  }
+
+  function formatClock(ts) {
+    var d = new Date(ts);
+    var h = d.getHours();
+    var mi = d.getMinutes();
+    var mm = (mi < 10 ? '0' : '') + mi;
+    var use12 = false;
+    try { use12 = ElionStorage.getSettings().clockFormat === '12'; } catch (e) { use12 = false; }
+    if (use12) {
+      var suffix = h >= 12 ? 'PM' : 'AM';
+      var h12 = h % 12;
+      if (!h12) h12 = 12;
+      return h12 + ':' + mm + ' ' + suffix;
+    }
+    return (h < 10 ? '0' : '') + h + ':' + mm;
   }
 
   function getProgrammesForChannel(channel) {
@@ -155,13 +191,13 @@
       var list = typeof channel === 'string'
         ? ((ElionStorage.getEpgCache().programmes || {})[channel] || [])
         : getProgrammesForChannel(channel);
-      var now = Date.now();
+      var now = guideNow();
       var current = null;
       var next = null;
       for (var i = 0; i < list.length; i++) {
         var p = list[i];
         if (!p) continue;
-        if (p.start <= now && now < p.stop) {
+        if (p.stop > p.start && p.start <= now && now < p.stop) {
           current = p;
           next = list[i + 1] || null;
           break;
@@ -179,28 +215,26 @@
   }
 
   function progressOf(programme) {
-    if (!programme) return 0;
-    var now = Date.now();
+    if (!programme || !programme.stop || programme.stop <= programme.start) return 0;
+    var now = guideNow();
     var span = programme.stop - programme.start;
-    if (span <= 0) return 0;
     return ElionUtils.clamp((now - programme.start) / span, 0, 1);
   }
 
   function formatRange(programme) {
-    if (!programme) return '';
-    var opts = { hour: '2-digit', minute: '2-digit' };
-    return new Date(programme.start).toLocaleTimeString([], opts) +
-      ' – ' +
-      new Date(programme.stop).toLocaleTimeString([], opts);
+    if (!programme || !programme.start) return '';
+    var start = formatClock(programme.start);
+    if (!programme.stop || programme.stop <= programme.start) return start;
+    return start + ' – ' + formatClock(programme.stop);
   }
 
   function getGuideForChannels(channels, hours) {
     hours = hours || 6;
-    var now = Date.now();
+    var now = guideNow();
     var end = now + hours * 3600000;
     return (channels || []).map(function (ch) {
       var list = getProgrammesForChannel(ch).filter(function (p) {
-        return p.stop > now && p.start < end;
+        return p.start < end && (p.stop ? p.stop > now : p.start >= now);
       }).slice(0, 16);
       var nn = getNowNext(ch);
       return { channel: ch, programmes: list, now: nn.now, next: nn.next };
@@ -214,6 +248,7 @@
 
   global.ElionEPG = {
     parseXmltv: parseXmltv,
+    guideNow: guideNow,
     loadFromUrl: loadFromUrl,
     loadFromText: loadFromText,
     resolveEpgKey: resolveEpgKey,

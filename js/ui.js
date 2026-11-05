@@ -1,13 +1,30 @@
 (function (global) {
   'use strict';
 
-  function toast(message, ms) {
+  function toast(message, ms, kind) {
     var el = document.getElementById('toast');
     if (!el) return;
+    if (typeof ms === 'string') {
+      kind = ms;
+      ms = 2800;
+    }
+    if (kind !== 'success' && kind !== 'warning' && kind !== 'error' && kind !== 'info') kind = 'info';
     el.textContent = message;
-    el.classList.add('show');
+    el.className = 'toast show toast-' + kind;
     clearTimeout(toast._t);
     toast._t = setTimeout(function () { el.classList.remove('show'); }, ms || 2800);
+  }
+
+  function notify(message, kind) {
+    toast(message, kind || 'info');
+  }
+
+  function appendHtml(parent, html) {
+    if (!parent) return parent;
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    parent.appendChild(tpl.content);
+    return parent;
   }
 
   function setLoading(active) {
@@ -70,7 +87,8 @@
     var fav = ElionFavorites.isFavorite(channel.id);
     var settings = ElionStorage.getSettings();
     var locked = ElionParental.isLockedChannel(channel);
-    var nn = ElionEPG.getNowNext(channel);
+    var nn = { now: null, next: null };
+    if (ElionEPG.hasData && ElionEPG.hasData()) nn = ElionEPG.getNowNext(channel);
     var nowTitle = nn.now ? nn.now.title : '';
     var progress = nn.now ? Math.round(ElionEPG.progressOf(nn.now) * 100) : 0;
     var layout = settings.channelListLayout || 'detailed';
@@ -98,7 +116,8 @@
         (opts.hideFav
           ? ''
           : '<button class="fav-toggle' + (fav ? ' on' : '') + '" data-focusable data-action="toggle-fav" data-id="' + ElionUtils.escapeHtml(channel.id) + '" type="button" title="' + (fav ? 'Remove favorite' : 'Add favorite') + '" aria-label="' + (fav ? 'Remove favorite' : 'Add favorite') + '">' +
-              (fav ? '★' : '☆') +
+              '<svg class="star-off" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8l4.6 10.2L40 19.2l-8 7.4 2.2 11.2L24 32.8 13.8 37.8 16 26.6 8 19.2l11.4-1z" fill="none" stroke="currentColor" stroke-width="3"/></svg>' +
+              '<svg class="star-on" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8l4.6 10.2L40 19.2l-8 7.4 2.2 11.2L24 32.8 13.8 37.8 16 26.6 8 19.2l11.4-1z" fill="currentColor"/></svg>' +
             '</button>') +
       '</div>'
     );
@@ -116,6 +135,8 @@
 
   function bindChannelList(root, onPlay) {
     root.querySelectorAll('[data-action="play"]').forEach(function (btn) {
+      if (btn.getAttribute('data-bound') === '1') return;
+      btn.setAttribute('data-bound', '1');
       btn.addEventListener('click', function () {
         var ch = ElionPlaylists.getChannelById(btn.getAttribute('data-id'));
         if (ch && onPlay) onPlay(ch);
@@ -211,13 +232,16 @@
     var root = document.documentElement;
     root.setAttribute('data-theme', s.theme || 'dark');
     root.setAttribute('data-text', s.textSize || 'medium');
-    root.style.setProperty('--accent', s.themeAccent || '#14B8A6');
+    root.style.setProperty('--accent', s.themeAccent || '#168BFF');
+    root.style.setProperty('--accent-2', '#00C8D7');
     document.body.classList.toggle('no-anim', s.animations === false);
   }
 
   global.ElionUI = {
     toast: toast,
     setLoading: setLoading,
+    notify: notify,
+    appendHtml: appendHtml,
     channelLogo: channelLogo,
     channelRow: channelRow,
     emptyState: emptyState,

@@ -2,7 +2,7 @@
 
 LG webOS IPTV application for watching channels from playlists the user adds. It is a web app (`com.elion.iptv`) packaged as an IPK. It is not an Android app.
 
-**Current version in `appinfo.json` and `package.json`:** 1.0.9  
+**Current version in `appinfo.json` and `package.json`:** 1.1.0  
 **Target set used during development:** LG 55NANO81T3A.BEUYLJP, webOS 11.2.0, firmware 43.22.13 (reported by the owner; not re-checked from the TV while writing this file).
 
 Full documentation:

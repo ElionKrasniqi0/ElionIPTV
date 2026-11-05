@@ -8,12 +8,25 @@
   var stallTimer = null;
   var playToken = 0;
   var autoRetryCount = 0;
-  var MAX_AUTO_RETRY = 0; // User must press Retry — no endless auto-retry loops
+  var retryTimer = null;
+  var hlsEngine = null;
+  var hlsLoadPromise = null;
+  var MAX_AUTO_RETRY = 3;
+  var RETRY_DELAYS = [2000, 5000, 12000];
   var bound = false;
+  var netBound = false;
+  var userPaused = false;
+  var linkDown = false;
+  var netTimer = null;
+  var hlsSoftTries = 0;
+  var watchOrigin = 0;
   var status = {
     playing: false,
     buffering: false,
+    recovering: false,
     error: null,
+    errorTitle: '',
+    recoveryDetail: '',
     channel: null,
     streamInfo: null,
     format: null
@@ -84,29 +97,219 @@
     if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
   }
 
+  function clearRetryTimer() {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  }
+
+  function clearNetTimer() {
+    if (netTimer) { clearTimeout(netTimer); netTimer = null; }
+  }
+
+  function playerIsOpen() {
+    var screen = document.getElementById('playerScreen');
+    return !!(screen && screen.classList.contains('active'));
+  }
+
+  function browserSaysOnline() {
+    if (typeof navigator === 'undefined' || navigator.onLine === undefined) return true;
+    return navigator.onLine !== false;
+  }
+
+  function nextRetryDelay(attempt) {
+    var n = attempt || 0;
+    if (n < 0) n = 0;
+    if (n >= RETRY_DELAYS.length) return RETRY_DELAYS[RETRY_DELAYS.length - 1];
+    return RETRY_DELAYS[n];
+  }
+
+  function classifyPlaybackFault(code, online) {
+    if (online === false || code === 'offline') {
+      return {
+        title: 'Internet connection lost',
+        detail: 'Your internet connection has been interrupted. Reconnecting...',
+        retry: true,
+        kind: 'offline'
+      };
+    }
+    if (code === 2 || code === 'network' || code === 'stall' || code === 'timeout') {
+      return {
+        title: 'Reconnecting',
+        detail: 'Trying to restore playback...',
+        retry: true,
+        kind: 'recover'
+      };
+    }
+    if (code === 4 || code === 'unavailable') {
+      return {
+        title: 'Stream unavailable',
+        detail: 'This channel is currently unavailable. Please try again later.',
+        retry: true,
+        kind: 'unavailable'
+      };
+    }
+    if (code === 'unsupported') {
+      return {
+        title: 'Playback error',
+        detail: 'Unable to play this channel. Please select another channel.',
+        retry: false,
+        kind: 'failed'
+      };
+    }
+    return {
+      title: 'Playback error',
+      detail: 'Unable to play this channel. Please select another channel.',
+      retry: code === 3 || code === 'media',
+      kind: 'failed'
+    };
+  }
+
+  function finalFault(kind) {
+    if (kind === 'offline') return classifyPlaybackFault('offline', false);
+    if (kind === 'failed' || kind === 'unsupported') return classifyPlaybackFault('unsupported');
+    return classifyPlaybackFault('unavailable');
+  }
+
+  function mediaAdvanced() {
+    if (!video) return false;
+    if (video.currentTime > watchOrigin + 0.25) return true;
+    return !!(status.playing && !video.paused && video.readyState >= 3);
+  }
+
+  function showRecovery(fault) {
+    status.recovering = true;
+    status.error = null;
+    status.errorTitle = fault.title;
+    status.recoveryDetail = fault.detail;
+    status.buffering = true;
+    status.playing = false;
+    emit();
+  }
+
+  function showFinalFault(fault) {
+    status.recovering = false;
+    status.recoveryDetail = '';
+    status.errorTitle = fault.title;
+    status.error = fault.detail;
+    status.playing = false;
+    status.buffering = false;
+    emit();
+  }
+
+  function restoreSameChannel() {
+    if (!currentChannel || !playerIsOpen() || userPaused) return;
+    if (retryTimer) return;
+    linkDown = !browserSaysOnline();
+    if (linkDown) {
+      showRecovery(classifyPlaybackFault('offline', false));
+      armOfflineWait();
+      return;
+    }
+    autoRetryCount = 0;
+    showRecovery(classifyPlaybackFault('network', true));
+    var token = playToken;
+    retryTimer = setTimeout(function () {
+      retryTimer = null;
+      if (token !== playToken || userPaused || !playerIsOpen()) return;
+      startPlayback(currentChannel, true);
+    }, 400);
+  }
+
+  function armOfflineWait() {
+    if (netTimer) return;
+    netTimer = setTimeout(function () {
+      netTimer = null;
+      if (!playerIsOpen() || !currentChannel || userPaused) return;
+      if (browserSaysOnline()) {
+        linkDown = false;
+        restoreSameChannel();
+        return;
+      }
+      linkDown = true;
+      showRecovery(classifyPlaybackFault('offline', false));
+      armOfflineWait();
+    }, 15000);
+  }
+
+  function bindNetworkWatch() {
+    if (netBound || !global.addEventListener) return;
+    netBound = true;
+    global.addEventListener('offline', function () {
+      linkDown = true;
+      if (!currentChannel || !playerIsOpen() || userPaused) return;
+      if (status.playing && video && !video.paused && video.readyState >= 3) return;
+      clearRetryTimer();
+      showRecovery(classifyPlaybackFault('offline', false));
+      armOfflineWait();
+    });
+    global.addEventListener('online', function () {
+      linkDown = false;
+      clearNetTimer();
+      if (!currentChannel || !playerIsOpen() || userPaused) return;
+      if (status.playing && video && !video.paused && video.readyState >= 2 && !status.recovering) return;
+      restoreSameChannel();
+    });
+  }
+
+  function destroyHls() {
+    if (!hlsEngine) return;
+    try { hlsEngine.destroy(); } catch (e) { /* ignore */ }
+    hlsEngine = null;
+  }
+
+  function nativeCanPlayHls() {
+    if (global.webOS || global.PalmSystem) return true;
+    if (!video || !video.canPlayType) return false;
+    var kind = '';
+    try {
+      kind = video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL') || '';
+    } catch (e) { kind = ''; }
+    return kind === 'probably' || kind === 'maybe';
+  }
+
+  function ensureHlsLibrary() {
+    if (global.Hls && global.Hls.isSupported && global.Hls.isSupported()) return Promise.resolve(true);
+    if (!global.MediaSource) return Promise.resolve(false);
+    if (hlsLoadPromise) return hlsLoadPromise;
+    hlsLoadPromise = new Promise(function (resolve) {
+      var script = document.createElement('script');
+      script.src = 'js/lib/hls.min.js';
+      script.onload = function () {
+        resolve(!!(global.Hls && global.Hls.isSupported && global.Hls.isSupported()));
+      };
+      script.onerror = function () { resolve(false); };
+      document.head.appendChild(script);
+    });
+    return hlsLoadPromise;
+  }
+
   function armLoadTimeout(token) {
     clearTimers();
-    var ms = (ElionStorage.getSettings().bufferSeconds || 3) * 1000 + 25000;
-    loadTimer = setTimeout(function () {
-      if (token !== playToken) return;
-      if (!status.playing && (status.buffering || !status.error)) {
-        status.error = 'Stream timed out while loading. It may be offline, expired, or blocked on this network.';
-        status.buffering = false;
-        status.playing = false;
-        try { if (video) video.pause(); } catch (e) { /* ignore */ }
-        emit();
+    watchOrigin = video ? video.currentTime : 0;
+    var stalledSince = Date.now();
+    var firstWait = (ElionStorage.getSettings().bufferSeconds || 3) * 1000 + 18000;
+    loadTimer = setTimeout(function watch() {
+      if (token !== playToken || userPaused) return;
+      if (mediaAdvanced()) {
+        stalledSince = 0;
+        watchOrigin = video ? video.currentTime : watchOrigin;
+        if (status.recovering && status.playing) {
+          status.recovering = false;
+          status.recoveryDetail = '';
+          status.error = null;
+          emit();
+        }
+        loadTimer = setTimeout(watch, 15000);
+        return;
       }
-    }, ms);
-
-    // Stall watchdog: if buffering forever after start, surface error
-    stallTimer = setTimeout(function () {
-      if (token !== playToken) return;
-      if (status.buffering && !status.playing && !status.error) {
-        status.error = 'Playback stalled. Check the stream or your connection, then press Retry.';
-        status.buffering = false;
-        emit();
+      if (!stalledSince) stalledSince = Date.now();
+      if (Date.now() - stalledSince < 20000) {
+        loadTimer = setTimeout(watch, 5000);
+        return;
       }
-    }, ms + 20000);
+      stalledSince = 0;
+      var kind = !browserSaysOnline() || linkDown ? 'offline' : 'timeout';
+      notePlaybackFailure(token, currentChannel, '', true, kind);
+    }, firstWait);
   }
 
   function updateStreamInfo() {
@@ -138,7 +341,7 @@
       format: status.format,
       width: w,
       height: h,
-      resolution: w && h ? (w + '×' + h) : '—',
+      resolution: w && h ? (w + 'x' + h) : '—',
       url: currentChannel.url,
       tracks: tracks
     };
@@ -148,6 +351,7 @@
     video = el;
     if (!video || bound) return;
     bound = true;
+    bindNetworkWatch();
 
     video.addEventListener('waiting', function () {
       status.buffering = true;
@@ -156,12 +360,22 @@
     video.addEventListener('playing', function () {
       status.playing = true;
       status.buffering = false;
+      status.recovering = false;
+      status.recoveryDetail = '';
       status.error = null;
+      status.errorTitle = '';
       autoRetryCount = 0;
-      clearTimers();
+      hlsSoftTries = 0;
+      linkDown = !browserSaysOnline();
+      userPaused = false;
+      clearNetTimer();
       updateStreamInfo();
       applyTrackPreferences();
       emit();
+    });
+    video.addEventListener('timeupdate', function () {
+      if (!video || userPaused) return;
+      if (video.currentTime > watchOrigin + 0.25) watchOrigin = video.currentTime;
     });
     video.addEventListener('canplay', function () {
       status.buffering = false;
@@ -180,20 +394,15 @@
       emit();
     });
     video.addEventListener('error', function () {
+      if (!video._elionToken || video._elionToken !== playToken) return;
+      if (userPaused) return;
       clearTimers();
       var err = video.error;
       var code = err ? err.code : 0;
-      var map = {
-        1: 'Playback aborted.',
-        2: 'Network error while loading the stream (offline, blocked, or HTTP failure).',
-        3: 'Stream decoding failed — codec/container may be unsupported on this webOS TV.',
-        4: 'Stream source not supported, invalid, or unreachable.'
-      };
-      status.error = (map[code] || 'Unable to play this stream.') +
-        ' The channel may be unavailable, expired, or incompatible. Use Retry or go back to the list.';
-      status.playing = false;
-      status.buffering = false;
-      emit();
+      if (code === 1) return;
+      var kind = code === 2 ? 'network' : (code === 3 ? 'media' : (code === 4 ? 'unavailable' : 'failed'));
+      if (!browserSaysOnline()) kind = 'offline';
+      notePlaybackFailure(playToken, currentChannel, '', true, kind);
     });
     video.addEventListener('loadstart', function () {
       status.buffering = true;
@@ -204,10 +413,20 @@
       applyTrackPreferences();
       emit();
     });
+    video.addEventListener('ended', function () {
+      if (!currentChannel) return;
+      var settings = ElionStorage.getSettings();
+      if (!settings.autoplayNext) return;
+      var dur = video.duration;
+      if (!isFinite(dur) || dur <= 0 || dur > 6 * 3600) return;
+      playNext().catch(function () { /* the list may not have another item */ });
+    });
   }
 
   function stopQuiet() {
     if (!video) return;
+    try { video._elionToken = 0; } catch (e0) { /* ignore */ }
+    destroyHls();
     try {
       video.pause();
       while (video.firstChild) video.removeChild(video.firstChild);
@@ -218,10 +437,18 @@
 
   function stop() {
     clearTimers();
+    clearRetryTimer();
+    clearNetTimer();
+    autoRetryCount = 0;
+    hlsSoftTries = 0;
+    userPaused = false;
     stopQuiet();
     status.playing = false;
     status.buffering = false;
+    status.recovering = false;
+    status.recoveryDetail = '';
     status.error = null;
+    status.errorTitle = '';
     emit();
   }
 
@@ -243,42 +470,41 @@
     });
   }
 
-  function startPlayback(channel) {
-    var token = ++playToken;
-    var url = ElionPlaylists.applyUdpProxy(channel.url);
-    var format = detectFormat(url);
-    currentChannel = channel;
-    status.channel = channel;
-    status.error = null;
-    status.buffering = true;
-    status.playing = false;
-    status.format = format.label;
-    status.streamInfo = { format: format.label, width: 0, height: 0, resolution: '—', url: channel.url, tracks: [] };
-    emit();
-
-    stopQuiet();
-    armLoadTimeout(token);
-
-    try {
-      var source = document.createElement('source');
-      source.setAttribute('src', url);
-      source.setAttribute('type', buildMediaOption(format));
-      video.appendChild(source);
-      video.src = url;
-    } catch (e) {
-      status.error = 'Unable to attach stream source on this TV.';
-      status.buffering = false;
-      emit();
-      return Promise.reject(e);
+  function notePlaybackFailure(token, channel, message, allowRetry, kind) {
+    if (token !== playToken) return;
+    if (userPaused || !playerIsOpen()) return;
+    clearRetryTimer();
+    var fault = classifyPlaybackFault(kind || 'failed', browserSaysOnline() && !linkDown);
+    if (message && !fault.detail) fault.detail = message;
+    if (!browserSaysOnline() || kind === 'offline') {
+      linkDown = true;
+      showRecovery(classifyPlaybackFault('offline', false));
+      armOfflineWait();
+      return;
     }
+    var canRetry = allowRetry !== false && fault.retry && channel && autoRetryCount < MAX_AUTO_RETRY;
+    if (canRetry) {
+      var delay = nextRetryDelay(autoRetryCount);
+      autoRetryCount++;
+      showRecovery(classifyPlaybackFault('network', true));
+      retryTimer = setTimeout(function () {
+        retryTimer = null;
+        if (token !== playToken || userPaused || !playerIsOpen()) return;
+        startPlayback(channel, true);
+      }, delay);
+      return;
+    }
+    showFinalFault(finalFault(fault.kind));
+  }
 
-    var playPromise = video.play();
+  function finishPlayPromise(token, channel, playPromise) {
     if (playPromise && typeof playPromise.then === 'function') {
       return playPromise.then(function () {
         if (token !== playToken) return false;
         status.playing = true;
         status.buffering = false;
         status.error = null;
+        autoRetryCount = 0;
         pushRecent(channel);
         updateStreamInfo();
         emit();
@@ -287,21 +513,112 @@
         if (token !== playToken) return false;
         var msg = (err && err.message) || 'Playback failed to start.';
         if (/interact|user|NotAllowed/i.test(msg)) {
-          status.error = 'TV blocked autoplay. Press Play to start.';
-        } else {
-          status.error = msg + ' The stream may be unavailable or incompatible with webOS.';
+          status.error = 'Press Play to start.';
+          status.playing = false;
+          status.buffering = false;
+          emit();
+          return false;
         }
-        status.playing = false;
-        status.buffering = false;
-        pushRecent(channel);
-        emit();
-        // Resolve (do not reject) so callers don't create unhandled rejections
+        notePlaybackFailure(token, channel, '', true, 'failed');
         return false;
       });
     }
-
     pushRecent(channel);
     return Promise.resolve(true);
+  }
+
+  function attachNative(url, format, token) {
+    var source = document.createElement('source');
+    source.setAttribute('src', url);
+    source.setAttribute('type', buildMediaOption(format));
+    video.appendChild(source);
+    video.src = url;
+    video._elionToken = token;
+  }
+
+  function attachHlsJs(url, token, channel) {
+    return ensureHlsLibrary().then(function (ok) {
+      if (token !== playToken) return false;
+      if (!ok || !global.Hls) {
+        notePlaybackFailure(token, channel, '', false, 'unsupported');
+        return false;
+      }
+      destroyHls();
+      var engine = new global.Hls({
+        enableWorker: false,
+        lowLatencyMode: false,
+        capLevelToPlayerSize: true
+      });
+      hlsEngine = engine;
+      engine.loadSource(url);
+      engine.attachMedia(video);
+      video._elionToken = token;
+      engine.on(global.Hls.Events.ERROR, function (event, data) {
+        if (token !== playToken || !data || !data.fatal || userPaused) return;
+        var netErr = data.type === global.Hls.ErrorTypes.NETWORK_ERROR;
+        var mediaErr = data.type === global.Hls.ErrorTypes.MEDIA_ERROR;
+        if (hlsSoftTries < 1 && netErr) {
+          hlsSoftTries++;
+          try { engine.startLoad(); return; } catch (e1) { /* fall through */ }
+        }
+        if (hlsSoftTries < 1 && mediaErr) {
+          hlsSoftTries++;
+          try { engine.recoverMediaError(); return; } catch (e2) { /* fall through */ }
+        }
+        destroyHls();
+        notePlaybackFailure(token, channel, '', true, netErr ? 'network' : (mediaErr ? 'media' : 'failed'));
+      });
+      return finishPlayPromise(token, channel, video.play());
+    });
+  }
+
+  function startPlayback(channel, isAutoRetry) {
+    var token = ++playToken;
+    userPaused = false;
+    if (!isAutoRetry) {
+      autoRetryCount = 0;
+      hlsSoftTries = 0;
+      clearRetryTimer();
+      clearNetTimer();
+    }
+    var url = ElionPlaylists.applyUdpProxy(channel.url);
+    var format = detectFormat(url);
+    currentChannel = channel;
+    status.channel = channel;
+    status.error = null;
+    status.errorTitle = '';
+    if (!isAutoRetry) {
+      status.recovering = false;
+      status.recoveryDetail = '';
+    }
+    status.buffering = true;
+    status.playing = false;
+    status.format = format.label;
+    status.streamInfo = { format: format.label, width: 0, height: 0, resolution: '—', tracks: [] };
+    emit();
+
+    if (/DASH|MKV|UDP|unsupported/i.test(format.label)) {
+      stopQuiet();
+      notePlaybackFailure(token, channel, '', false, 'unsupported');
+      return Promise.resolve(false);
+    }
+
+    stopQuiet();
+    armLoadTimeout(token);
+
+    var useHlsJs = format.transport === 'HLS' && !nativeCanPlayHls();
+    if (useHlsJs) {
+      return attachHlsJs(url, token, channel);
+    }
+
+    try {
+      attachNative(url, format, token);
+    } catch (e) {
+      notePlaybackFailure(token, channel, '', false, 'failed');
+      return Promise.resolve(false);
+    }
+
+    return finishPlayPromise(token, channel, video.play());
   }
 
   function retry() {
@@ -343,11 +660,17 @@
   function togglePlayPause() {
     if (!video) return;
     if (video.paused) {
+      userPaused = false;
       video.play().catch(function (err) {
-        status.error = (err && err.message) || 'Unable to resume playback.';
-        emit();
+        if (userPaused) return;
+        notePlaybackFailure(playToken, currentChannel, (err && err.message) || '', true, 'failed');
       });
     } else {
+      userPaused = true;
+      clearRetryTimer();
+      clearNetTimer();
+      status.recovering = false;
+      status.recoveryDetail = '';
       video.pause();
     }
   }
@@ -595,6 +918,8 @@
     onChange: onChange,
     getVideo: function () { return video; },
     getCurrentChannel: function () { return currentChannel; },
-    detectFormat: detectFormat
+    detectFormat: detectFormat,
+    classifyPlaybackFault: classifyPlaybackFault,
+    nextRetryDelay: nextRetryDelay
   };
 })(window);
