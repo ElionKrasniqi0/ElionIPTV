@@ -57,6 +57,14 @@
       </main>
     </div>
 
+    <div id="channelNumberEntry" class="channel-number-entry" aria-live="polite" aria-hidden="true">
+      <div class="channel-number-card">
+        <div id="channelNumberDigits" class="channel-number-digits"></div>
+        <div id="channelNumberName" class="channel-number-name"></div>
+        <div id="channelNumberDetail" class="channel-number-detail"></div>
+      </div>
+    </div>
+
     <div id="playerScreen" class="player-screen" aria-label="Player">
       <video id="playerVideo" playsinline webkit-playsinline></video>
       <div id="playerBuffering" class="player-buffering">Loading channel…</div>
@@ -209,7 +217,7 @@
           </section>
           <section>
             <h3>Video player</h3>
-            <p>OK shows the controls. Previous and Next change channel. Up and Down also change channel. CH+ and CH− do the same when the TV sends those buttons to the app. Back returns to the list. Playback depends on the stream and this TV.</p>
+            <p>OK shows the controls. Previous and Next change channel. Up and Down also change channel. CH+ and CH− do the same when the TV sends those buttons to the app. Type a channel number to jump to it. The channel opens as soon as that number cannot be a longer channel. Press OK to open the number on screen. Backspace removes a digit. Back clears the number, then returns to the list. Playback depends on the stream and this TV.</p>
           </section>
           <section>
             <h3>Refresh playlists</h3>

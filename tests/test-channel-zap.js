@@ -28,7 +28,7 @@ var html = load('index.html');
 var css = load('css/app.css');
 var appinfo = JSON.parse(load('appinfo.json'));
 
-assert(appinfo.version === '1.1.0', 'Version is 1.1.0');
+assert(appinfo.version === '1.1.1', 'Version is 1.1.1');
 
 /* Direction: UP = next (+1), DOWN = previous (-1) */
 assert(focus.indexOf("playerChannelStep(dir === 'up' ? 1 : -1)") !== -1, 'UP maps to next channel (+1)');

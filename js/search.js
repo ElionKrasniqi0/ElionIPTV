@@ -7,7 +7,6 @@
    */
 
   var index = [];
-  var version = 0;
 
   function tokenize(str) {
     return String(str || '')
@@ -27,38 +26,24 @@
   }
 
   function build(channels) {
-    version++;
-    var v = version;
     index = [];
     var list = channels || [];
-    var i = 0;
-    var CHUNK = 500;
-
-    function step() {
-      if (v !== version) return;
-      var end = Math.min(i + CHUNK, list.length);
-      for (; i < end; i++) {
-        var ch = list[i];
-        var hay = [
-          ch.name,
-          ch.group,
-          ch.tvgId,
-          ch.tvgName,
-          ch.number != null ? String(ch.number) : ''
-        ].join(' ').toLowerCase();
-        index.push({
-          id: ch.id,
-          hay: hay,
-          tokens: tokenizeSafe([ch.name, ch.group, ch.tvgId, ch.tvgName].join(' '))
-        });
-      }
-      if (i < list.length) {
-        setTimeout(step, 0);
-      } else if (global.ElionLog) {
-        ElionLog.debug('Search index ready', { entries: index.length });
-      }
+    for (var i = 0; i < list.length; i++) {
+      var ch = list[i];
+      var hay = [
+        ch.name,
+        ch.group,
+        ch.tvgId,
+        ch.tvgName,
+        ch.number != null ? String(ch.number) : ''
+      ].join(' ').toLowerCase();
+      index.push({
+        id: ch.id,
+        hay: hay,
+        tokens: tokenizeSafe([ch.name, ch.group, ch.tvgId, ch.tvgName].join(' '))
+      });
     }
-    step();
+    if (global.ElionLog) ElionLog.debug('Search index ready', { entries: index.length });
   }
 
   function search(query, limit) {

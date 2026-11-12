@@ -300,9 +300,29 @@
 
   var playlistRefreshBusy = false;
 
+  function setReloadLabel(busy) {
+    var btn = document.getElementById('btnReload');
+    if (!btn) return;
+    var span = btn.querySelector('span');
+    var label = busy ? 'Refreshing...' : 'Reload';
+    if (span) span.textContent = label;
+    btn.setAttribute('aria-label', busy ? 'Refreshing...' : 'Reload IPTV');
+    btn.setAttribute('title', busy ? 'Refreshing...' : 'Reload IPTV');
+  }
+
+  function finishReload(ok, message) {
+    playlistRefreshBusy = false;
+    setReloadLabel(false);
+    ElionUI.setLoading(false);
+    ElionUI.toast(message, ok ? 'success' : 'error');
+    if (global.ElionApp && ElionApp.addMessage) {
+      ElionApp.addMessage(ok ? 'Playlist refreshed' : 'Playlist refresh failed', message);
+    }
+  }
+
   function reloadActivePlaylist() {
     if (playlistRefreshBusy) {
-      ElionUI.toast('A refresh is already running. Please wait.');
+      ElionUI.toast('Refreshing is already in progress.');
       return;
     }
     var state = st();
@@ -317,32 +337,26 @@
       return;
     }
     playlistRefreshBusy = true;
+    setReloadLabel(true);
     ElionUI.setLoading(true);
-    ElionUI.toast('Reload IPTV…');
-    ElionPlaylists.refreshPlaylist(pl.id).then(function (r) {
-      playlistRefreshBusy = false;
-      ElionUI.setLoading(false);
+    ElionUI.toast('Refreshing...', 120000, 'info');
+    var refresh = ElionPlaylists.refreshPlaylist(pl.id);
+    refresh.then(function (r) {
       if (r && r.ok) {
-        var okMsg = 'Playlist refreshed. ' + (r.channelCount || 0) + ' channels.';
-        ElionUI.toast(okMsg);
-        if (global.ElionApp && ElionApp.addMessage) ElionApp.addMessage('Playlist refreshed', okMsg);
+        finishReload(true, 'Playlist refreshed. ' + (r.channelCount || 0) + ' channels.');
         if (global.ElionApp) ElionApp.updateChrome(current);
         render(null);
         return;
       }
       var raw = (r && r.errors && r.errors[0]) || '';
       var msg = /already in progress/i.test(raw)
-        ? 'A refresh is already running. Please wait.'
+        ? 'Refreshing is already in progress.'
         : 'Could not refresh the playlist. Your saved channels are still available.';
-      ElionUI.toast(msg);
-      if (global.ElionApp && ElionApp.addMessage) ElionApp.addMessage('Playlist refresh failed', msg);
+      finishReload(false, msg);
     }).catch(function () {
-      playlistRefreshBusy = false;
-      ElionUI.setLoading(false);
-      var fail = 'Could not refresh the playlist. Your saved channels are still available.';
-      ElionUI.toast(fail);
-      if (global.ElionApp && ElionApp.addMessage) ElionApp.addMessage('Playlist refresh failed', fail);
+      finishReload(false, 'Could not refresh the playlist. Your saved channels are still available.');
     });
+    return refresh;
   }
 
   function isGenericSeriesLabel(part) {
@@ -1633,17 +1647,32 @@
         ElionUI.toast('Refresh is available for playlists added from a web address.');
         return;
       }
+      if (playlistRefreshBusy) {
+        ElionUI.toast('Refreshing is already in progress.');
+        return;
+      }
+      playlistRefreshBusy = true;
+      setReloadLabel(true);
       ElionUI.setLoading(true);
-      statusEl('Refreshing channels…');
+      statusEl('Refreshing...');
       return ElionPlaylists.refreshPlaylist(refreshId).then(function (r) {
+        playlistRefreshBusy = false;
+        setReloadLabel(false);
         ElionUI.setLoading(false);
         if (r.superseded) return;
         if (r.ok) {
           ElionUI.notify('Channels updated · ' + r.channelCount + ' channels', 'success');
+        } else if (r.errors && /already in progress/i.test(r.errors[0] || '')) {
+          ElionUI.toast('Refreshing is already in progress.');
         } else {
-          ElionErrors.show(ElionErrors.create('NETWORK'));
+          ElionUI.toast('Could not refresh the playlist. Your saved channels are still available.', 'error');
         }
         render();
+      }).catch(function () {
+        playlistRefreshBusy = false;
+        setReloadLabel(false);
+        ElionUI.setLoading(false);
+        ElionUI.toast('Could not refresh the playlist. Your saved channels are still available.', 'error');
       });
     }
     if (action === 'switch-pl') {

@@ -395,7 +395,6 @@
     importInFlight = ElionM3U.parseAsync(text, { playlistId: playlistId, skipDuplicates: true }, function (p) {
       if (gen !== importGeneration) return;
       state.parseProgress = p;
-      emit();
     }).then(function (parsed) {
       if (gen !== importGeneration) {
         return { ok: false, errors: ['Import superseded.'] };
@@ -429,14 +428,16 @@
       });
     }
 
-    setLoading(true);
     state.lastError = null;
     ElionLog.info('Downloading playlist');
-    // Mark in-flight so overlapping URL imports are rejected until download+parse settle
+    // Mark in-flight so overlapping URL imports are rejected until download+parse settle.
+    // Start the request before any loading notification so a screen rebuild cannot delay it.
     var gate = { pending: true };
     importInFlight = gate;
+    var download = ElionUtils.downloadText(url, 90000, { accept: 'playlist', retries: 2 });
+    setLoading(true);
 
-    return ElionUtils.downloadText(url, 90000, { accept: 'playlist', retries: 2 }).then(function (text) {
+    return download.then(function (text) {
       importInFlight = null;
       var meta = {
         name: name || deriveNameFromUrl(url),

@@ -281,109 +281,17 @@
   function parseAsync(text, options, onProgress) {
     options = options || {};
     return new Promise(function (resolve) {
-      // For small playlists, sync parse is fine and faster
-      var size = text == null ? 0 : String(text).length;
-      if (size < 400000) {
-        resolve(parse(text, options));
-        return;
+      var result = parse(text, options);
+      if (onProgress) {
+        try {
+          onProgress({
+            linesDone: 1,
+            lineCount: 1,
+            channelCount: result.channels ? result.channels.length : 0
+          });
+        } catch (e) { /* ignore */ }
       }
-
-      var playlistId = options.playlistId || 'default';
-      var result = { ok: false, channels: [], categories: [], errors: [], warnings: [], header: {} };
-      if (text == null || String(text).trim() === '') {
-        result.errors.push('Playlist is empty.');
-        resolve(result);
-        return;
-      }
-
-      var content = String(text).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      var lines = content.split('\n');
-      var pending = null;
-      var pendingGroup = null;
-      var channels = [];
-      var seenUrls = Object.create(null);
-      var categoryMap = Object.create(null);
-      var categoryOrder = [];
-      var started = false;
-      var i = 0;
-      var CHUNK = 800;
-
-      function finish() {
-        if (pending) result.warnings.push('Trailing EXTINF without URL discarded.');
-        if (!started && channels.length === 0) {
-          result.errors.push('Not a valid M3U playlist (missing #EXTM3U and no stream URLs found).');
-          resolve(result);
-          return;
-        }
-        if (channels.length === 0) {
-          result.errors.push('No channels found in playlist.');
-          resolve(result);
-          return;
-        }
-        result.ok = true;
-        result.channels = channels;
-        result.categories = categoriesInOrder(categoryOrder, categoryMap);
-        resolve(result);
-      }
-
-      function step() {
-        var end = Math.min(i + CHUNK, lines.length);
-        for (; i < end; i++) {
-          var line = lines[i].trim();
-          if (!line) continue;
-          if (line.indexOf('#EXTM3U') === 0) {
-            started = true;
-            result.header = parseAttributes(line.replace(/^#EXTM3U/i, '').trim());
-            continue;
-          }
-          if (line.charAt(0) === '#') {
-            if (/^#EXTINF:/i.test(line)) {
-              try {
-                pending = splitExtinf(line);
-                if (pendingGroup && !(pending.attrs && pending.attrs['group-title'])) pending.group = pendingGroup;
-              } catch (e) {
-                result.warnings.push('Line ' + (i + 1) + ': malformed EXTINF ignored.');
-                pending = null;
-              }
-              continue;
-            }
-            if (/^#EXTGRP:/i.test(line)) {
-              pendingGroup = line.replace(/^#EXTGRP:/i, '').trim();
-              if (pending && !(pending.attrs && pending.attrs['group-title'])) pending.group = pendingGroup;
-              continue;
-            }
-            continue;
-          }
-          if (isUrlLine(line)) {
-            started = true;
-            var url = sanitizeMediaUrl(line);
-            if (!url) { pending = null; continue; }
-            var raw = pending || { duration: -1, attrs: {}, title: '', group: pendingGroup };
-            raw.url = url;
-            if (!raw.group && pendingGroup && !(raw.attrs && raw.attrs['group-title'])) {
-              raw.group = pendingGroup;
-            }
-            var channel = normalizeChannel(raw, channels.length, playlistId);
-            if (channel.url && !(seenUrls[channel.url] && options.skipDuplicates !== false)) {
-              seenUrls[channel.url] = true;
-              channels.push(channel);
-              rememberCategory(categoryOrder, categoryMap, channel.group);
-            } else if (channel.url) {
-              result.warnings.push('Duplicate URL skipped: ' + channel.name);
-            }
-            pending = null;
-          } else if (pending) {
-            result.warnings.push('Line ' + (i + 1) + ': EXTINF without URL discarded.');
-            pending = null;
-          }
-        }
-        if (onProgress) {
-          try { onProgress({ linesDone: i, lineCount: lines.length, channelCount: channels.length }); } catch (e) { /* ignore */ }
-        }
-        if (i < lines.length) setTimeout(step, 0);
-        else finish();
-      }
-      step();
+      resolve(result);
     });
   }
 

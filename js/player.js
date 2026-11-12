@@ -20,9 +20,13 @@
   var netTimer = null;
   var hlsSoftTries = 0;
   var watchOrigin = 0;
+  var lastProgressAt = 0;
+  var STALL_PROGRESS_MS = 30000;
+  var STALL_FAIL_MS = 55000;
   var status = {
     playing: false,
     buffering: false,
+    loading: false,
     recovering: false,
     error: null,
     errorTitle: '',
@@ -169,14 +173,24 @@
     return classifyPlaybackFault('unavailable');
   }
 
-  function mediaAdvanced() {
-    if (!video) return false;
-    if (video.currentTime > watchOrigin + 0.25) return true;
-    return !!(status.playing && !video.paused && video.readyState >= 3);
+  function noteMediaProgress() {
+    lastProgressAt = Date.now();
+    if (video) watchOrigin = video.currentTime;
+  }
+
+  /**
+   * True when the stream has made recent progress.
+   * Uses wall-clock lastProgressAt — comparing currentTime to watchOrigin at
+   * sample time is unreliable because timeupdate keeps them nearly equal.
+   */
+  function mediaHealthy() {
+    if (!video || userPaused || !lastProgressAt) return false;
+    return (Date.now() - lastProgressAt) < STALL_PROGRESS_MS;
   }
 
   function showRecovery(fault) {
     status.recovering = true;
+    status.loading = true;
     status.error = null;
     status.errorTitle = fault.title;
     status.recoveryDetail = fault.detail;
@@ -187,6 +201,7 @@
 
   function showFinalFault(fault) {
     status.recovering = false;
+    status.loading = false;
     status.recoveryDetail = '';
     status.errorTitle = fault.title;
     status.error = fault.detail;
@@ -285,15 +300,15 @@
   function armLoadTimeout(token) {
     clearTimers();
     watchOrigin = video ? video.currentTime : 0;
-    var stalledSince = Date.now();
+    lastProgressAt = 0;
+    var loadArmedAt = Date.now();
     var firstWait = (ElionStorage.getSettings().bufferSeconds || 3) * 1000 + 18000;
     loadTimer = setTimeout(function watch() {
       if (token !== playToken || userPaused) return;
-      if (mediaAdvanced()) {
-        stalledSince = 0;
-        watchOrigin = video ? video.currentTime : watchOrigin;
+      if (mediaHealthy()) {
         if (status.recovering && status.playing) {
           status.recovering = false;
+          status.loading = false;
           status.recoveryDetail = '';
           status.error = null;
           emit();
@@ -301,12 +316,13 @@
         loadTimer = setTimeout(watch, 15000);
         return;
       }
-      if (!stalledSince) stalledSince = Date.now();
-      if (Date.now() - stalledSince < 20000) {
+      // Allow temporary live-stream buffering without restarting playback.
+      var baseline = lastProgressAt || loadArmedAt;
+      var quietFor = Date.now() - baseline;
+      if (quietFor < STALL_FAIL_MS) {
         loadTimer = setTimeout(watch, 5000);
         return;
       }
-      stalledSince = 0;
       var kind = !browserSaysOnline() || linkDown ? 'offline' : 'timeout';
       notePlaybackFailure(token, currentChannel, '', true, kind);
     }, firstWait);
@@ -354,12 +370,15 @@
     bindNetworkWatch();
 
     video.addEventListener('waiting', function () {
+      // Mid-stream segment gaps are normal for live IPTV — track buffering
+      // for status text only; do not re-enter channel-loading overlay.
       status.buffering = true;
       emit();
     });
     video.addEventListener('playing', function () {
       status.playing = true;
       status.buffering = false;
+      status.loading = false;
       status.recovering = false;
       status.recoveryDetail = '';
       status.error = null;
@@ -368,6 +387,7 @@
       hlsSoftTries = 0;
       linkDown = !browserSaysOnline();
       userPaused = false;
+      noteMediaProgress();
       clearNetTimer();
       updateStreamInfo();
       applyTrackPreferences();
@@ -375,10 +395,11 @@
     });
     video.addEventListener('timeupdate', function () {
       if (!video || userPaused) return;
-      if (video.currentTime > watchOrigin + 0.25) watchOrigin = video.currentTime;
+      if (video.currentTime > watchOrigin + 0.05) noteMediaProgress();
     });
     video.addEventListener('canplay', function () {
       status.buffering = false;
+      if (status.playing) status.loading = false;
       updateStreamInfo();
       emit();
     });
@@ -390,6 +411,7 @@
       if (!currentChannel) return;
     });
     video.addEventListener('stalled', function () {
+      // Temporary stall while already playing must not look like a new load.
       status.buffering = true;
       emit();
     });
@@ -405,6 +427,9 @@
       notePlaybackFailure(playToken, currentChannel, '', true, kind);
     });
     video.addEventListener('loadstart', function () {
+      // loadstart also fires on routine HLS/media pipeline activity.
+      // Never promote it to status.loading — that flag is set only by
+      // startPlayback / recovery so the overlay stays off mid-stream.
       status.buffering = true;
       emit();
     });
@@ -445,6 +470,7 @@
     stopQuiet();
     status.playing = false;
     status.buffering = false;
+    status.loading = false;
     status.recovering = false;
     status.recoveryDetail = '';
     status.error = null;
@@ -503,8 +529,10 @@
         if (token !== playToken) return false;
         status.playing = true;
         status.buffering = false;
+        status.loading = false;
         status.error = null;
         autoRetryCount = 0;
+        noteMediaProgress();
         pushRecent(channel);
         updateStreamInfo();
         emit();
@@ -516,6 +544,7 @@
           status.error = 'Press Play to start.';
           status.playing = false;
           status.buffering = false;
+          status.loading = false;
           emit();
           return false;
         }
@@ -591,6 +620,7 @@
       status.recovering = false;
       status.recoveryDetail = '';
     }
+    status.loading = true;
     status.buffering = true;
     status.playing = false;
     status.format = format.label;

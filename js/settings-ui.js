@@ -260,7 +260,7 @@
       '<img class="app-logo app-logo-about" src="assets/images/elion-iptv-logo.png" alt="ELION IPTV">' +
       '<ul class="checklist">' +
         '<li><strong>Application</strong> ELION IPTV</li>' +
-        '<li><strong>Version</strong> 1.1.0</li>' +
+        '<li><strong>Version</strong> 1.1.1</li>' +
         '<li><strong>Made for</strong> LG Smart TVs (webOS)</li>' +
         '<li><strong>Remote</strong> Magic Remote ready — arrows, OK, and Back</li>' +
         '<li><strong>Content</strong> Uses only the playlists you add</li>' +

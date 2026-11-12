@@ -25,11 +25,14 @@ assert(playerSrc.indexOf('recoverMediaError') !== -1, 'HLS media errors can reco
 assert(playerSrc.indexOf('startLoad') !== -1, 'HLS network errors can reload in place');
 assert(playerSrc.indexOf('userPaused') !== -1, 'A manual pause is not treated as a failure');
 assert(playerSrc.indexOf('MAX_AUTO_RETRY') !== -1, 'Automatic retries are capped');
+assert(playerSrc.indexOf('lastProgressAt') !== -1, 'Stall detection uses progress timestamps');
+assert(playerSrc.indexOf('status.loading') !== -1, 'Intentional loading is tracked separately from buffering');
 assert(playerSrc.indexOf('Your internet connection has been interrupted. Reconnecting...') !== -1, 'Offline copy');
 assert(playerSrc.indexOf('Trying to restore playback...') !== -1, 'Reconnecting copy');
 assert(playerSrc.indexOf('This channel is currently unavailable. Please try again later.') !== -1, 'Unavailable copy');
 assert(playerSrc.indexOf('Unable to play this channel. Please select another channel.') !== -1, 'Final playback copy');
 assert(appSrc.indexOf('playerErrorTitle') !== -1, 'Error title is updated from the player');
+assert(appSrc.indexOf('st.loading || st.recovering') !== -1, 'Overlay is not driven by transient buffering alone');
 assert(appSrc.indexOf('btnErrorRetry') !== -1, 'Manual retry remains available');
 assert(html.indexOf('id="btnPrev"') !== -1 && html.indexOf('id="btnNext"') !== -1 && html.indexOf('id="btnPlayPause"') !== -1 && html.indexOf('id="btnCategories"') !== -1, 'Player controls remain');
 

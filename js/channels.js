@@ -9,6 +9,66 @@
     ids: [],
     source: 'all'
   };
+  var numberIndex = null;
+  var numberIndexKey = '';
+  var NUMBER_ENTRY_MAX = 10;
+
+  function reduceNumberEntry(digits, action) {
+    digits = digits ? String(digits) : '';
+    if (action === 'clear') return '';
+    if (action === 'backspace' || action === 'delete') return digits.slice(0, -1);
+    if (!/^[0-9]$/.test(action || '')) return digits;
+    if (digits.length >= NUMBER_ENTRY_MAX) return digits;
+    return digits + action;
+  }
+
+  function channelNumberIndex() {
+    var state = ElionPlaylists.getState();
+    var list = state.channels || [];
+    var playlist = state.activePlaylist;
+    var key = (state.activePlaylistId || '') + '|' + (playlist && playlist.updatedAt || 0) + '|' + list.length;
+    if (numberIndex && numberIndexKey === key) return numberIndex;
+    var byNumber = Object.create(null);
+    var exact = Object.create(null);
+    var extendable = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var ch = list[i];
+      if (!ch) continue;
+      var n = parseInt(ch.number, 10);
+      if (!n || n < 1) n = i + 1;
+      if (byNumber[n]) continue;
+      byNumber[n] = ch;
+      var text = String(n);
+      exact[text] = ch;
+      for (var p = 1; p < text.length; p++) extendable[text.slice(0, p)] = true;
+    }
+    numberIndex = { byNumber: byNumber, exact: exact, extendable: extendable };
+    numberIndexKey = key;
+    return numberIndex;
+  }
+
+  function findByNumber(number) {
+    var n = parseInt(number, 10);
+    if (!n || n < 1) return null;
+    return channelNumberIndex().byNumber[n] || null;
+  }
+
+  /**
+   * tune: these digits are a channel and no longer channel starts with them.
+   * partial: more digits could still match a channel.
+   * none: no channel can match these digits.
+   */
+  function classifyDigits(digits) {
+    digits = String(digits || '');
+    if (!/^[0-9]+$/.test(digits)) return { status: 'empty', channel: null, canExtend: false };
+    var index = channelNumberIndex();
+    var channel = index.exact[digits] || null;
+    var canExtend = !!index.extendable[digits];
+    var status = 'partial';
+    if (!channel && !canExtend) status = 'none';
+    else if (channel && !canExtend) status = 'tune';
+    return { status: status, channel: channel, canExtend: canExtend };
+  }
 
   function setBrowseList(channels, source) {
     browseContext.ids = (channels || []).map(function (c) { return c.id; });
@@ -97,6 +157,10 @@
     sortChannels: sortChannels,
     filterByGroup: filterByGroup,
     getSortedAll: getSortedAll,
-    indexOf: indexOf
+    indexOf: indexOf,
+    findByNumber: findByNumber,
+    reduceNumberEntry: reduceNumberEntry,
+    classifyDigits: classifyDigits,
+    NUMBER_ENTRY_MAX: NUMBER_ENTRY_MAX
   };
 })(window);

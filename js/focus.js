@@ -452,6 +452,39 @@
    * Some sets also report ChannelUp / ChannelDown. Not every remote delivers these
    * keys to a web app; Up/Down and the player Previous/Next buttons remain available.
    */
+  function digitFromEvent(e) {
+    if (!e) return '';
+    var code = e.keyCode || e.which || 0;
+    if (code >= 48 && code <= 57) return String(code - 48);
+    if (code >= 96 && code <= 105) return String(code - 96);
+    var key = e.key || '';
+    if (/^[0-9]$/.test(key)) return key;
+    var named = e.code || '';
+    if (/^Digit[0-9]$/.test(named)) return named.charAt(5);
+    if (/^Numpad[0-9]$/.test(named)) return named.charAt(6);
+    return '';
+  }
+
+  var digitDown = Object.create(null);
+
+  function digitToken(e) {
+    return String(e.keyCode || e.which || 0) + ':' + digitFromEvent(e);
+  }
+
+  function isNumberEdit(e) {
+    var code = e.keyCode || e.which || 0;
+    var key = e.key || '';
+    if (code === KEY.BACKSPACE || key === 'Backspace') return true;
+    if (code === 46 || key === 'Delete' || key === 'Del') return true;
+    return false;
+  }
+
+  function numberEntryBlocked(e) {
+    if (keyboardVisible || isTextEntryField(e.target)) return true;
+    if (!global.ElionApp || !ElionApp.numberEntryAllowed || !ElionApp.numberEntryAllowed()) return true;
+    return false;
+  }
+
   function channelKeyDelta(e) {
     var code = e.keyCode || e.which || 0;
     var key = e.key || '';
@@ -510,6 +543,33 @@
       if (e.repeat || isDuplicateKey(e)) return;
       if (global.ElionApp && ElionApp.playerChannelKey) ElionApp.playerChannelKey(channelDelta);
       noteKeyCost(t0, 'channel-key');
+      return;
+    }
+
+    var digit = digitFromEvent(e);
+    if (digit) {
+      if (numberEntryBlocked(e)) {
+        /* Leave the key for the text field or the current page. */
+      } else {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        var token = digitToken(e);
+        if (e.repeat || digitDown[token]) return;
+        digitDown[token] = true;
+        ElionApp.numberEntryDigit(digit);
+        noteKeyCost(t0, 'channel-number');
+        return;
+      }
+    }
+
+    if (!numberEntryBlocked(e) && isNumberEdit(e) && ElionApp.numberEntryPending && ElionApp.numberEntryPending()) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      if (e.repeat) return;
+      ElionApp.numberEntryEdit();
+      noteKeyCost(t0, 'channel-number-edit');
       return;
     }
 
@@ -598,6 +658,14 @@
         return;
       }
 
+      // A typed number that is a real channel opens on OK, with no delay.
+      if (!numberEntryBlocked(e) && global.ElionApp && ElionApp.numberEntryPending && ElionApp.numberEntryPending()) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (ElionApp.numberEntryConfirm) ElionApp.numberEntryConfirm();
+        return;
+      }
+
       // Watching with controls hidden: OK reveals the player bar.
       if (global.ElionApp && ElionApp.playerOkAction && ElionApp.playerOkAction()) {
         e.preventDefault();
@@ -633,6 +701,11 @@
       e.stopPropagation();
       if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
       if (isDuplicateKey(e)) return;
+      if (global.ElionApp && ElionApp.numberEntryPending && ElionApp.numberEntryPending()) {
+        ElionApp.numberEntryClear();
+        noteKeyCost(t0, 'channel-number-clear');
+        return;
+      }
       if (global.ElionApp && typeof ElionApp.handleBack === 'function') {
         ElionApp.handleBack();
       }
@@ -654,6 +727,20 @@
   }
 
   function onKeyUp(e) {
+    var digit = digitFromEvent(e);
+    if (digit) {
+      var token = digitToken(e);
+      if (digitDown[token]) {
+        digitDown[token] = false;
+        return;
+      }
+      if (!numberEntryBlocked(e) && ElionApp.numberEntryDigit) {
+        e.preventDefault();
+        e.stopPropagation();
+        ElionApp.numberEntryDigit(digit);
+      }
+      return;
+    }
     if (keyboardVisible || isTextEntryField(e.target)) {
       // Do not swallow keyup for IME / text entry
       if (isBack(e) && !keyboardVisible && !isTextEntryField(e.target)) {
@@ -766,6 +853,7 @@
     isFocusable: isFocusable,
     isTextEntryField: isTextEntryField,
     activateTextField: activateTextField,
-    isKeyboardVisible: function () { return keyboardVisible; }
+    isKeyboardVisible: function () { return keyboardVisible; },
+    digitFromEvent: digitFromEvent
   };
 })(window);

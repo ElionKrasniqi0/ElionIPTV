@@ -610,6 +610,11 @@
   }
 
   function openPlayer(channel) {
+    numberEntryClear();
+    openPlayerNow(channel);
+  }
+
+  function openPlayerNow(channel) {
     try {
       if (!channel) {
         ElionUI.toast('No channel selected');
@@ -708,7 +713,177 @@
     favBtn.classList.toggle('is-fav-on', on);
   }
 
+  var entryDigits = '';
+  var entryRejected = false;
+  var entryHideTimer = null;
+  var NUMBER_HIDE_MS = 1800;
+  var LIVE_NUMBER_SCREENS = { live: 1, categories: 1, category: 1, channels: 1, epg: 1 };
+
+  function clearEntryTimers() {
+    if (entryHideTimer) {
+      clearTimeout(entryHideTimer);
+      entryHideTimer = null;
+    }
+  }
+
+  function numberEntryAllowed() {
+    var active = document.activeElement;
+    if (ElionFocus.isTextEntryField && ElionFocus.isTextEntryField(active)) return false;
+    if (ElionFocus.isKeyboardVisible && ElionFocus.isKeyboardVisible()) return false;
+    var blockIds = ['modalHost', 'helpPanel', 'messagesPanel'];
+    for (var i = 0; i < blockIds.length; i++) {
+      var el = document.getElementById(blockIds[i]);
+      if (el && el.classList.contains('active')) return false;
+    }
+    if (isPlayerActive()) return true;
+    try {
+      var cur = ElionScreens.getCurrent();
+      return !!(cur && LIVE_NUMBER_SCREENS[cur.name]);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function hideNumberOverlay() {
+    var box = document.getElementById('channelNumberEntry');
+    if (!box) return;
+    box.classList.remove('active', 'is-missing');
+    box.setAttribute('aria-hidden', 'true');
+  }
+
+  function paintNumberOverlay(digits, name, detail, missing) {
+    var box = document.getElementById('channelNumberEntry');
+    if (!box) return;
+    var digitsEl = document.getElementById('channelNumberDigits');
+    var nameEl = document.getElementById('channelNumberName');
+    var detailEl = document.getElementById('channelNumberDetail');
+    if (digitsEl) digitsEl.textContent = digits || '';
+    if (nameEl) nameEl.textContent = name || '';
+    if (detailEl) detailEl.textContent = detail || '';
+    box.classList.toggle('is-missing', !!missing);
+    box.classList.add('active');
+    box.setAttribute('aria-hidden', 'false');
+  }
+
+  function previewNumberEntry(digits) {
+    var result = ElionChannels.classifyDigits(digits);
+    if (result.channel) paintNumberOverlay(digits, result.channel.name || 'Channel', result.channel.group || '', false);
+    else paintNumberOverlay(digits, '', '', false);
+  }
+
+  function scheduleNumberHide() {
+    if (entryHideTimer) clearTimeout(entryHideTimer);
+    entryHideTimer = setTimeout(function () {
+      entryHideTimer = null;
+      if (!entryDigits) hideNumberOverlay();
+    }, NUMBER_HIDE_MS);
+  }
+
+  function showNumberMissing(raw) {
+    paintNumberOverlay(raw, '', 'Channel Not Found', true);
+    scheduleNumberHide();
+  }
+
+  function tuneNumberChannel(ch) {
+    paintNumberOverlay(String(ch.number || ''), ch.name || 'Channel', ch.group || '', false);
+    if (isPlayerActive()) {
+      if (categoryListOpen) closePlayerCategoryList();
+      if (channelListOpen) closePlayerChannelList();
+      lastPlayedChannelId = ch.id;
+      ensureZapBrowseContext(ch);
+      updatePlayerHeader(ch);
+      showChannelZapOsd(ch, 'Loading…');
+      var buf = document.getElementById('playerBuffering');
+      if (buf) buf.classList.add('active');
+      ElionPlayer.playChannel(ch).then(function (ok) {
+        showChannelZapOsd(ch, ok === false ? 'Unable to play' : 'Playing');
+        scheduleNumberHide();
+      }).catch(function () {
+        showChannelZapOsd(ch, 'Unable to play');
+        scheduleNumberHide();
+      });
+      return;
+    }
+    openPlayerNow(ch);
+    scheduleNumberHide();
+  }
+
+  function finishNumberEntry(raw) {
+    var result = ElionChannels.classifyDigits(raw);
+    if (result.status === 'tune' && result.channel) {
+      entryDigits = '';
+      entryRejected = false;
+      tuneNumberChannel(result.channel);
+      return 'tune';
+    }
+    if (result.status === 'none') {
+      entryDigits = '';
+      entryRejected = true;
+      showNumberMissing(raw);
+      return 'none';
+    }
+    entryDigits = raw;
+    entryRejected = false;
+    previewNumberEntry(raw);
+    return 'partial';
+  }
+
+  function numberEntryDigit(digit) {
+    if (!numberEntryAllowed()) return false;
+    if (entryHideTimer) {
+      clearTimeout(entryHideTimer);
+      entryHideTimer = null;
+    }
+    var base = entryRejected ? '' : entryDigits;
+    var next = ElionChannels.reduceNumberEntry(base, String(digit));
+    if (next === base) return false;
+    finishNumberEntry(next);
+    return true;
+  }
+
+  function numberEntryConfirm() {
+    if (entryRejected || !entryDigits) return false;
+    var result = ElionChannels.classifyDigits(entryDigits);
+    if (!result.channel) return false;
+    entryDigits = '';
+    entryRejected = false;
+    tuneNumberChannel(result.channel);
+    return true;
+  }
+
+  function numberEntryEdit() {
+    if (entryRejected) {
+      entryRejected = false;
+      entryDigits = '';
+      clearEntryTimers();
+      hideNumberOverlay();
+      return true;
+    }
+    if (!entryDigits) return false;
+    entryDigits = ElionChannels.reduceNumberEntry(entryDigits, 'backspace');
+    if (!entryDigits) {
+      clearEntryTimers();
+      hideNumberOverlay();
+      return true;
+    }
+    previewNumberEntry(entryDigits);
+    return true;
+  }
+
+  function numberEntryClear() {
+    entryDigits = '';
+    entryRejected = false;
+    clearEntryTimers();
+    hideNumberOverlay();
+    return true;
+  }
+
+  function numberEntryPending() {
+    return !!entryDigits || entryRejected;
+  }
+
   function closePlayer() {
+    numberEntryClear();
     var restoreId = lastPlayedChannelId;
     try {
       var cur = ElionPlayer.getCurrentChannel();
@@ -872,11 +1047,15 @@
         var errTitle = document.getElementById('playerErrorTitle');
         var errText = document.getElementById('playerErrorText');
         if (buf) {
-          buf.classList.toggle('active', !!st.buffering && !st.error);
+          // Overlay only for intentional channel load / recovery — not mid-stream waits.
+          var showLoadOverlay = !st.error && !!(st.loading || st.recovering);
+          buf.classList.toggle('active', showLoadOverlay);
           buf.textContent = (st.recovering && st.recoveryDetail) ? st.recoveryDetail : 'Loading channel…';
         }
         if (st.error) setPlayerStatus(st.errorTitle || 'Playback error');
         else if (st.recovering) setPlayerStatus(st.errorTitle || 'Reconnecting');
+        else if (st.loading) setPlayerStatus('Loading');
+        else if (st.buffering && st.playing) setPlayerStatus('Buffering');
         else if (st.buffering) setPlayerStatus('Loading');
         else if (st.paused) setPlayerStatus('Paused');
         else if (st.playing) setPlayerStatus('Playing');
@@ -1022,6 +1201,11 @@
         return;
       }
 
+      if (numberEntryPending()) {
+        numberEntryClear();
+        return;
+      }
+
       var player = document.getElementById('playerScreen');
       if (player && player.classList.contains('active')) {
         // In-player channel list: first Back closes the list, second exits player.
@@ -1056,6 +1240,12 @@
     updateClock: updateClock,
     addMessage: addMessage,
     playerChannelStep: playerChannelStep,
+    numberEntryDigit: numberEntryDigit,
+    numberEntryEdit: numberEntryEdit,
+    numberEntryConfirm: numberEntryConfirm,
+    numberEntryClear: numberEntryClear,
+    numberEntryAllowed: numberEntryAllowed,
+    numberEntryPending: numberEntryPending,
     playerChannelKey: playerChannelKey,
     playerOkAction: playerOkAction,
     isPlayerActive: isPlayerActive,
