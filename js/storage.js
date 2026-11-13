@@ -163,6 +163,7 @@
       rememberLastChannel: true,
       preferredAudio: '',
       preferredSubtitle: '',
+      preferredQuality: 'auto',
       udpProxyEnabled: false,
       udpProxyAddress: '192.168.0.1',
       udpProxyPort: '4022',
@@ -202,6 +203,7 @@
     if (typeof next.epgSourceUrl !== 'string') next.epgSourceUrl = '';
     if (typeof next.preferredAudio !== 'string') next.preferredAudio = '';
     if (typeof next.preferredSubtitle !== 'string') next.preferredSubtitle = '';
+    if (typeof next.preferredQuality !== 'string' || !next.preferredQuality) next.preferredQuality = 'auto';
     if (next.clockFormat !== '12' && next.clockFormat !== '24') next.clockFormat = '24';
     var epgOffset = parseInt(next.epgOffsetMinutes, 10);
     next.epgOffsetMinutes = isFinite(epgOffset) ? Math.max(-720, Math.min(720, epgOffset)) : 0;

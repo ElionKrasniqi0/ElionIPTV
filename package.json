@@ -1,6 +1,6 @@
 {
   "name": "elion-iptv",
-  "version": "1.1.1",
+  "version": "1.1.4",
   "private": true,
   "description": "ELION IPTV for LG webOS TV",
   "scripts": {
@@ -8,7 +8,7 @@
     "test:m3u": "node scripts/test-m3u.js",
     "test:epg": "node scripts/test-epg.js",
     "validate": "node scripts/validate-package.js",
-    "qc": "node scripts/validate-package.js && node tests/run-tests.js && node tests/critical-path.js && node tests/test-import-focus.js && node tests/test-playlist-lifecycle.js && node tests/test-resilience.js && node tests/test-user-journey.js && node tests/test-channel-zap.js && node tests/test-channel-number.js && node tests/test-reload.js && node tests/test-performance.js && node tests/test-player-controls.js && node tests/test-playback-recovery.js && node tests/test-loading-overlay.js && node tests/test-category-order.js && node scripts/test-m3u.js && node scripts/test-epg.js",
+    "qc": "node scripts/validate-package.js && node tests/run-tests.js && node tests/critical-path.js && node tests/test-import-focus.js && node tests/test-playlist-lifecycle.js && node tests/test-resilience.js && node tests/test-user-journey.js && node tests/test-channel-zap.js && node tests/test-channel-number.js && node tests/test-reload.js && node tests/test-performance.js && node tests/test-player-controls.js && node tests/test-playback-recovery.js && node tests/test-loading-overlay.js && node tests/test-video-quality.js && node tests/test-category-order.js && node scripts/test-m3u.js && node scripts/test-epg.js",
     "test:critical": "node tests/critical-path.js",
     "companion": "node companion/server.js"
   }

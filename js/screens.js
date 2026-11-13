@@ -1452,6 +1452,31 @@
       });
     }
 
+    var qualitySelect = root.querySelector('#setQuality');
+    if (qualitySelect && !qualitySelect.getAttribute('data-bound')) {
+      qualitySelect.setAttribute('data-bound', '1');
+      qualitySelect.addEventListener('change', function () {
+        var chosen = qualitySelect.value || 'auto';
+        var qualityResult = { ok: false, message: 'Quality unavailable' };
+        try {
+          qualityResult = ElionPlayer.selectQuality(chosen);
+        } catch (eQ) {
+          qualityResult = { ok: false, message: (eQ && eQ.message) || 'Quality unavailable' };
+        }
+        ElionUI.toast(qualityResult.message || (qualityResult.ok ? 'Quality updated' : 'Quality unavailable'));
+        if (!qualityResult.ok) {
+          try {
+            var mode = (ElionPlayer.listQualityLevels() || {}).mode || 'auto';
+            qualitySelect.value = mode;
+          } catch (eRevert) {
+            qualitySelect.value = 'auto';
+          }
+          return;
+        }
+        navigate('settings', { tab: 'playback' });
+      });
+    }
+
     var groupFilter = root.querySelector('#groupFilter');
     if (groupFilter) {
       groupFilter.addEventListener('change', function () {
@@ -1599,6 +1624,13 @@
       var subResult = ElionPlayer.selectTextTrack(el.getAttribute('data-index'));
       ElionUI.toast(subResult.message || (subResult.ok ? 'Subtitles updated' : 'Subtitles unavailable'));
       if (subResult.ok) return navigate('settings', { tab: 'playback' });
+      return;
+    }
+    if (action === 'set-quality') {
+      // Legacy button path — dropdown (#setQuality) is preferred.
+      var qualityResult = ElionPlayer.selectQuality(el.getAttribute('data-id'));
+      ElionUI.toast(qualityResult.message || (qualityResult.ok ? 'Quality updated' : 'Quality unavailable'));
+      if (qualityResult.ok) return navigate('settings', { tab: 'playback' });
       return;
     }
     if (action === 'set-sort') {
@@ -1979,11 +2011,16 @@
 
   function savePlayback() {
     var buf = parseInt(val('setBuffer'), 10);
+    var qualityVal = val('setQuality') || ElionStorage.getSettings().preferredQuality || 'auto';
     ElionStorage.saveSettings({
       autoplayNext: val('setAutoplay') === '1',
       bufferSeconds: isFinite(buf) ? ElionUtils.clamp(buf, 1, 30) : 3,
-      playerControlsPinned: val('setControls') === 'pinned'
+      playerControlsPinned: val('setControls') === 'pinned',
+      preferredQuality: qualityVal
     });
+    if (document.getElementById('setQuality') && global.ElionPlayer && ElionPlayer.selectQuality) {
+      try { ElionPlayer.selectQuality(qualityVal); } catch (eQ) { /* preference already saved */ }
+    }
     statusEl('Playback settings saved.', true);
     ElionUI.toast('Saved');
   }

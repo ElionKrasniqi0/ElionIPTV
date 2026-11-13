@@ -2344,6 +2344,46 @@ html[data-theme="dark"] .settings-panel {
   padding: 12px;
   margin-bottom: 12px;
 }
+.quality-select-wrap {
+  max-width: 560px;
+  margin: 8px 0 12px;
+}
+
+.quality-select-wrap label {
+  font-size: 20px;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+select.quality-select {
+  width: 100%;
+  min-height: 64px;
+  font-size: 26px;
+  line-height: 1.3;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--input-bg);
+  color: var(--text);
+}
+
+select.quality-select:focus,
+select.quality-select.is-focused {
+  border-color: var(--accent-2);
+  box-shadow: var(--focus-ring);
+}
+
+.quality-selected-hint {
+  margin: 10px 0 0;
+  font-size: 20px;
+  color: var(--muted);
+}
+
+.quality-selected-hint strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .lang-list {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

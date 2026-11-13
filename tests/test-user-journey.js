@@ -26,7 +26,7 @@ var css = fs.readFileSync(path.join(root, 'css/app.css'), 'utf8');
 var appinfo = JSON.parse(fs.readFileSync(path.join(root, 'appinfo.json'), 'utf8'));
 
 assert(appinfo.id === 'com.elion.iptv', 'App ID preserved');
-assert(appinfo.version === '1.1.1', 'Version is 1.1.1');
+assert(appinfo.version === '1.1.4', 'Version is 1.1.4');
 
 /* ---- Home (six destinations) ---- */
 assert(screens.indexOf("hubTile('live'") !== -1, 'Home: Live TV tile');

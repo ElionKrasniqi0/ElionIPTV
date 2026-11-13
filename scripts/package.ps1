@@ -15,7 +15,7 @@ if (-not (Get-Command ares-package -ErrorAction SilentlyContinue)) {
   Write-Host "Full steps: docs\WEBOS_BUILD.md"
   Write-Host ""
   Write-Host "After install, re-run this script. Expected IPK:"
-  Write-Host "  dist\com.elion.iptv_1.1.0_all.ipk"
+  Write-Host "  dist\com.elion.iptv_1.1.4_all.ipk"
   exit 1
 }
 

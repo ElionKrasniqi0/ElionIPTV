@@ -23,6 +23,15 @@
   var lastProgressAt = 0;
   var STALL_PROGRESS_MS = 30000;
   var STALL_FAIL_MS = 55000;
+  var qualityLevels = [];
+  var qualityMode = 'auto';
+  var qualityProbeToken = 0;
+  var activeStreamUrl = '';
+  var masterStreamUrl = '';
+  var abrStartBpsHint = 0;
+  var playbackEngine = '';
+  var playlistKind = '';
+  var qualityProbeNote = '';
   var status = {
     playing: false,
     buffering: false,
@@ -82,18 +91,250 @@
     return { mime: 'application/vnd.apple.mpegurl', transport: 'HLS', label: 'HLS (assumed)' };
   }
 
-  function buildMediaOption(format) {
+  function readPreferredQuality() {
+    try {
+      var s = ElionStorage.getSettings();
+      if (s && s.preferredQuality) return String(s.preferredQuality);
+    } catch (e) { /* ignore */ }
+    return 'auto';
+  }
+
+  function heightQualityLabel(height) {
+    var h = parseInt(height, 10) || 0;
+    if (h >= 2000) return '2160p (4K)';
+    if (h >= 1400) return '1440p (2K)';
+    if (h >= 1000) return '1080p (Full HD)';
+    if (h >= 700) return '720p (HD)';
+    if (h >= 500) return '576p';
+    if (h >= 400) return '480p';
+    if (h > 0) return h + 'p';
+    return 'Unknown';
+  }
+
+  function qualityTierFromHeight(height) {
+    var h = parseInt(height, 10) || 0;
+    if (h >= 2000) return '4K';
+    if (h >= 1400) return '2K';
+    if (h >= 1000) return 'FHD';
+    if (h >= 700) return 'HD';
+    if (h > 0) return 'SD';
+    return '';
+  }
+
+  /**
+   * webOS defaults maxWidth/maxHeight to 1920x1080, which blocks 4K variants.
+   * Unlock up to UHD for Auto; cap only when the user locks a lower quality.
+   * abrStartBpsHint (from master probe) raises the native/HLS.js start bitrate
+   * toward the highest published rung without inventing resolutions.
+   */
+  function qualityAdaptiveLimits(pref) {
+    var mode = pref == null ? qualityMode : String(pref);
+    var limits;
+    if (!mode || mode === 'auto') {
+      limits = { maxWidth: 3840, maxHeight: 2160, startBps: 12000000 };
+    } else {
+      var h = parseInt(mode, 10) || 0;
+      if (h >= 2000) limits = { maxWidth: 3840, maxHeight: 2160, startBps: 20000000 };
+      else if (h >= 1000) limits = { maxWidth: 1920, maxHeight: 1080, startBps: 8000000 };
+      else if (h >= 700) limits = { maxWidth: 1280, maxHeight: 720, startBps: 4500000 };
+      else if (h >= 500) limits = { maxWidth: 1024, maxHeight: 576, startBps: 2500000 };
+      else if (h >= 400) limits = { maxWidth: 854, maxHeight: 480, startBps: 1500000 };
+      else limits = { maxWidth: 3840, maxHeight: 2160, startBps: 12000000 };
+    }
+    if ((!mode || mode === 'auto') && abrStartBpsHint > limits.startBps) {
+      limits.startBps = Math.min(abrStartBpsHint, 25000000);
+    }
+    return limits;
+  }
+
+  function buildMediaOption(format, pref) {
+    var limits = qualityAdaptiveLimits(pref);
     var options = {
       mediaTransportType: format.transport,
       option: {
         mediaFormat: { type: 'video' },
         adaptiveStreaming: {
           adaptiveResolution: true,
-          seamlessPlay: true
+          seamlessPlay: true,
+          maxWidth: limits.maxWidth,
+          maxHeight: limits.maxHeight,
+          bps: { start: limits.startBps }
         }
       }
     };
     return format.mime + ';mediaOption=' + encodeURI(JSON.stringify(options));
+  }
+
+  function resolvePlaylistUrl(baseUrl, ref) {
+    var target = String(ref || '').trim();
+    if (!target) return '';
+    if (/^https?:\/\//i.test(target)) return target;
+    try {
+      if (typeof URL === 'function') return new URL(target, baseUrl).href;
+    } catch (e) { /* fall through */ }
+    var base = String(baseUrl || '');
+    if (target.charAt(0) === '/') {
+      var m = /^https?:\/\/[^/]+/i.exec(base);
+      return m ? (m[0] + target) : target;
+    }
+    return base.replace(/[^/]*$/, '') + target;
+  }
+
+  function codecsLikelySupported(codecs) {
+    var raw = String(codecs || '').trim();
+    if (!raw) return true;
+    var parts = raw.split(',');
+    var videoCodec = '';
+    for (var i = 0; i < parts.length; i++) {
+      var c = parts[i].trim();
+      if (/avc1|avc3|hvc1|hev1|vp09|vp9|av01/i.test(c)) {
+        videoCodec = c;
+        break;
+      }
+    }
+    if (!videoCodec) return true;
+    // Native webOS often plays HEVC/AVC even when canPlayType is empty — only
+    // reject codecs the HTML5 pipeline clearly cannot handle.
+    if (/av01|vp09|vp9/i.test(videoCodec)) {
+      if (!video || !video.canPlayType) return false;
+      var a = '';
+      var b = '';
+      try {
+        a = video.canPlayType('video/mp4; codecs="' + videoCodec + '"') || '';
+        b = video.canPlayType('video/mp2t; codecs="' + videoCodec + '"') || '';
+      } catch (e2) { return false; }
+      return !!(a || b);
+    }
+    return true;
+  }
+
+  function dedupeQualityLevels(levels) {
+    var sorted = (levels || []).slice().sort(function (a, b) {
+      if (b.height !== a.height) return b.height - a.height;
+      return b.bandwidth - a.bandwidth;
+    });
+    var deduped = [];
+    var usedHeight = {};
+    var usedBw = {};
+    for (var j = 0; j < sorted.length; j++) {
+      var level = sorted[j];
+      if (level.height > 0) {
+        if (usedHeight[level.height]) continue;
+        usedHeight[level.height] = true;
+      } else {
+        var bwKey = 'bw-' + level.bandwidth;
+        if (usedBw[bwKey]) continue;
+        usedBw[bwKey] = true;
+      }
+      deduped.push(level);
+    }
+    return deduped;
+  }
+
+  function parseHlsMasterPlaylist(text, baseUrl) {
+    var src = String(text || '');
+    var lines = src.split(/\r?\n/);
+    var out = [];
+    var seen = {};
+    for (var i = 0; i < lines.length; i++) {
+      var line = String(lines[i] || '').trim();
+      if (line.indexOf('#EXT-X-STREAM-INF:') !== 0) continue;
+      var attrs = line.slice('#EXT-X-STREAM-INF:'.length);
+      var bw = parseInt((/BANDWIDTH=(\d+)/i.exec(attrs) || [])[1], 10) || 0;
+      var avg = parseInt((/AVERAGE-BANDWIDTH=(\d+)/i.exec(attrs) || [])[1], 10) || 0;
+      if (!bw && avg) bw = avg;
+      var res = /RESOLUTION=(\d+)x(\d+)/i.exec(attrs);
+      var codecs = ((/CODECS="([^"]*)"/i.exec(attrs) || [])[1]) || '';
+      var next = String(lines[i + 1] || '').trim();
+      if (!next || next.charAt(0) === '#') continue;
+      var width = res ? parseInt(res[1], 10) : 0;
+      var height = res ? parseInt(res[2], 10) : 0;
+      if (!codecsLikelySupported(codecs)) continue;
+      var url = resolvePlaylistUrl(baseUrl, next);
+      if (!url) continue;
+      var id = height > 0 ? String(height) : ('bw-' + bw);
+      var key = id + '|' + url;
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push({
+        id: id,
+        height: height,
+        width: width,
+        bandwidth: bw,
+        codecs: codecs,
+        url: url,
+        label: height > 0 ? heightQualityLabel(height) : ((Math.round(bw / 1000) || '?') + ' kbps')
+      });
+    }
+    return dedupeQualityLevels(out);
+  }
+
+  function findQualityLevel(id) {
+    var want = String(id || '');
+    for (var i = 0; i < qualityLevels.length; i++) {
+      if (String(qualityLevels[i].id) === want) return qualityLevels[i];
+    }
+    return null;
+  }
+
+  function matchLevelToHeight(height) {
+    var h = parseInt(height, 10) || 0;
+    if (!h || !qualityLevels.length) return null;
+    var best = null;
+    var bestDiff = Infinity;
+    for (var i = 0; i < qualityLevels.length; i++) {
+      var lvl = qualityLevels[i];
+      if (!lvl.height) continue;
+      var diff = Math.abs(lvl.height - h);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = lvl;
+      }
+    }
+    return best;
+  }
+
+  function sourceQualitySummary() {
+    if (!qualityLevels.length) {
+      if (playlistKind === 'media') return 'single-bitrate';
+      if (playlistKind === 'probe-failed') return 'probe unavailable';
+      return 'unknown';
+    }
+    var labels = [];
+    for (var i = 0; i < qualityLevels.length; i++) {
+      labels.push(qualityTierFromHeight(qualityLevels[i].height) || qualityLevels[i].label);
+    }
+    return labels.join('/');
+  }
+
+  function syncQualityIntoStreamInfo() {
+    if (!status.streamInfo) status.streamInfo = {};
+    status.streamInfo.qualities = qualityLevels.slice();
+    status.streamInfo.qualityMode = qualityMode;
+    status.streamInfo.selectedQuality = qualityMode === 'auto'
+      ? 'Auto'
+      : (findQualityLevel(qualityMode) ? findQualityLevel(qualityMode).label : heightQualityLabel(qualityMode));
+    var w = status.streamInfo.width || 0;
+    var h = status.streamInfo.height || 0;
+    status.streamInfo.actualTier = qualityTierFromHeight(h);
+    status.streamInfo.actualLabel = h ? heightQualityLabel(h) : '';
+    status.streamInfo.resolution = w && h ? (w + 'x' + h) : (status.streamInfo.resolution || '—');
+    status.streamInfo.decodedResolution = w && h ? (w + 'x' + h) : '—';
+    status.streamInfo.engine = playbackEngine || '';
+    status.streamInfo.playlistKind = playlistKind || '';
+    status.streamInfo.sourceQualities = sourceQualitySummary();
+    status.streamInfo.probeNote = qualityProbeNote || '';
+    var matched = matchLevelToHeight(h);
+    var locked = qualityMode !== 'auto' ? findQualityLevel(qualityMode) : null;
+    var bitLevel = locked || matched || (qualityMode === 'auto' && qualityLevels[0] ? null : null);
+    if (qualityMode !== 'auto' && locked) bitLevel = locked;
+    else if (matched) bitLevel = matched;
+    status.streamInfo.selectedBitrate = bitLevel && bitLevel.bandwidth
+      ? Math.round(bitLevel.bandwidth / 1000) + ' kbps'
+      : '';
+    status.streamInfo.codec = (bitLevel && bitLevel.codecs) || (matched && matched.codecs) || '';
+    // Never claim 4K from source labels alone — actualTier stays decoded-only.
+    status.streamInfo.sourceHas4k = qualityLevels.some(function (q) { return q.height >= 2000; });
   }
 
   function clearTimers() {
@@ -358,9 +599,10 @@
       width: w,
       height: h,
       resolution: w && h ? (w + 'x' + h) : '—',
-      url: currentChannel.url,
+      url: activeStreamUrl || currentChannel.url,
       tracks: tracks
     };
+    syncQualityIntoStreamInfo();
   }
 
   function bindVideo(el) {
@@ -467,6 +709,14 @@
     autoRetryCount = 0;
     hlsSoftTries = 0;
     userPaused = false;
+    qualityProbeToken++;
+    qualityLevels = [];
+    abrStartBpsHint = 0;
+    playbackEngine = '';
+    playlistKind = '';
+    qualityProbeNote = '';
+    activeStreamUrl = '';
+    masterStreamUrl = '';
     stopQuiet();
     status.playing = false;
     status.buffering = false;
@@ -476,6 +726,109 @@
     status.error = null;
     status.errorTitle = '';
     emit();
+  }
+
+  function listQualityLevels() {
+    var out = {
+      supported: true,
+      mode: qualityMode,
+      tracks: [],
+      message: 'Start a channel to choose video quality.'
+    };
+    out.tracks.push({
+      id: 'auto',
+      label: 'Auto (Recommended)',
+      enabled: qualityMode === 'auto' || !currentChannel
+    });
+    if (!currentChannel) {
+      out.message = 'Start a channel to inspect published resolutions. Auto remains available.';
+      return out;
+    }
+    for (var i = 0; i < qualityLevels.length; i++) {
+      var q = qualityLevels[i];
+      out.tracks.push({
+        id: String(q.id),
+        label: q.label,
+        height: q.height,
+        bandwidth: q.bandwidth,
+        enabled: String(qualityMode) === String(q.id)
+      });
+    }
+    if (qualityLevels.length) {
+      out.message = '';
+    } else if (playlistKind === 'probe-failed') {
+      out.message = 'Manual quality selection is unavailable for this channel (playlist could not be inspected). Auto remains available.';
+    } else if (playlistKind === 'media') {
+      out.message = 'This channel is a single-bitrate stream. Manual quality selection is unavailable; Auto stays active.';
+    } else if (hlsEngine) {
+      out.message = 'Quality options appear when the stream publishes multiple resolutions.';
+    } else {
+      out.message = 'Manual quality selection is unavailable until a multi-variant HLS master is detected. Auto remains available.';
+    }
+    return out;
+  }
+
+  function reconcilePreferredQuality() {
+    if (qualityMode === 'auto') return;
+    if (findQualityLevel(qualityMode)) return;
+    // Keep the saved preference for later channels; use Auto on this stream only.
+    qualityMode = 'auto';
+    qualityProbeNote = (qualityProbeNote ? (qualityProbeNote + ' ') : '') +
+      'Saved resolution is not published by this channel; using Auto.';
+    syncQualityIntoStreamInfo();
+  }
+
+  function selectQuality(id) {
+    var want = id == null ? 'auto' : String(id);
+    if (!currentChannel) {
+      try {
+        if (global.ElionStorage) ElionStorage.saveSettings({ preferredQuality: want === 'auto' ? 'auto' : want });
+      } catch (eSave) { /* ignore */ }
+      qualityMode = want === 'auto' ? 'auto' : want;
+      return {
+        ok: want === 'auto',
+        message: want === 'auto'
+          ? 'Quality preference saved: Auto (Recommended)'
+          : 'Start a channel before applying a manual resolution. Preference was saved for compatible channels.'
+      };
+    }
+    if (want !== 'auto' && !findQualityLevel(want)) {
+      return {
+        ok: false,
+        message: 'That resolution is not available for this channel. Choose Auto (Recommended) or another published option.'
+      };
+    }
+    qualityMode = want;
+    try {
+      if (global.ElionStorage) ElionStorage.saveSettings({ preferredQuality: want });
+    } catch (e0) { /* ignore */ }
+    syncQualityIntoStreamInfo();
+    emit();
+
+    if (hlsEngine) {
+      applyHlsJsQualityPreference(hlsEngine);
+      updateStreamInfo();
+      emit();
+      return {
+        ok: true,
+        message: want === 'auto' ? 'Quality: Auto (Recommended)' : ('Quality: ' + (findQualityLevel(want).label || want))
+      };
+    }
+
+    // Native webOS / progressive: Auto keeps the master playlist; a lock uses that variant URL.
+    var playUrl = masterStreamUrl || (currentChannel && currentChannel.url) || activeStreamUrl;
+    if (want !== 'auto') {
+      var level = findQualityLevel(want);
+      if (level && level.url) playUrl = level.url;
+    }
+    playUrl = ElionPlaylists.applyUdpProxy(playUrl);
+    startPlayback(currentChannel, false, { streamUrl: playUrl, keepQuality: true });
+    return {
+      ok: true,
+      message: want === 'auto'
+        ? 'Quality: Auto (Recommended)'
+        : ('Quality: ' + ((findQualityLevel(want) && findQualityLevel(want).label) || want) + ' — confirming decoded resolution…')
+    };
   }
 
   function playChannel(channel) {
@@ -559,13 +912,66 @@
   function attachNative(url, format, token) {
     var source = document.createElement('source');
     source.setAttribute('src', url);
-    source.setAttribute('type', buildMediaOption(format));
+    source.setAttribute('type', buildMediaOption(format, qualityMode));
     video.appendChild(source);
     video.src = url;
     video._elionToken = token;
   }
 
+  function applyHlsJsQualityPreference(engine) {
+    if (!engine || !engine.levels || !engine.levels.length) return;
+    if (qualityMode === 'auto') {
+      try { engine.currentLevel = -1; } catch (e0) { /* ignore */ }
+      return;
+    }
+    var want = parseInt(qualityMode, 10) || 0;
+    var best = -1;
+    var bestDiff = Infinity;
+    for (var i = 0; i < engine.levels.length; i++) {
+      var h = engine.levels[i].height || 0;
+      if (!h) continue;
+      var diff = Math.abs(h - want);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    }
+    if (best >= 0) {
+      try { engine.currentLevel = best; } catch (e1) { /* ignore */ }
+    }
+  }
+
+  function ingestHlsJsLevels(engine) {
+    if (!engine || !engine.levels) return;
+    var mapped = [];
+    for (var i = 0; i < engine.levels.length; i++) {
+      var lvl = engine.levels[i];
+      var height = lvl.height || 0;
+      var width = lvl.width || 0;
+      var bw = lvl.bitrate || 0;
+      if (!codecsLikelySupported(lvl.videoCodec || lvl.codecs || '')) continue;
+      mapped.push({
+        id: height > 0 ? String(height) : ('bw-' + bw),
+        height: height,
+        width: width,
+        bandwidth: bw,
+        codecs: lvl.videoCodec || '',
+        url: lvl.url || (lvl.uri || ''),
+        label: height > 0 ? heightQualityLabel(height) : ((Math.round(bw / 1000) || '?') + ' kbps'),
+        hlsIndex: i
+      });
+    }
+    mapped.sort(function (a, b) {
+      if (b.height !== a.height) return b.height - a.height;
+      return b.bandwidth - a.bandwidth;
+    });
+    qualityLevels = mapped;
+    syncQualityIntoStreamInfo();
+    emit();
+  }
+
   function attachHlsJs(url, token, channel) {
+    playbackEngine = 'hls.js';
     return ensureHlsLibrary().then(function (ok) {
       if (token !== playToken) return false;
       if (!ok || !global.Hls) {
@@ -573,15 +979,40 @@
         return false;
       }
       destroyHls();
+      var limits = qualityAdaptiveLimits(qualityMode);
       var engine = new global.Hls({
         enableWorker: false,
         lowLatencyMode: false,
-        capLevelToPlayerSize: true
+        // Never cap to the 1080p app surface — that blocked 4K/FHD ladders.
+        capLevelToPlayerSize: false,
+        startLevel: -1,
+        abrEwmaDefaultEstimate: Math.max(limits.startBps, abrStartBpsHint || 0, 5000000),
+        abrBandWidthFactor: 0.95,
+        abrBandWidthUpFactor: 0.8
       });
       hlsEngine = engine;
       engine.loadSource(url);
       engine.attachMedia(video);
       video._elionToken = token;
+      engine.on(global.Hls.Events.MANIFEST_PARSED, function () {
+        if (token !== playToken) return;
+        ingestHlsJsLevels(engine);
+        playlistKind = qualityLevels.length ? 'master' : 'media';
+        if (qualityMode === 'auto' && qualityLevels.length && qualityLevels[0].bandwidth) {
+          abrStartBpsHint = qualityLevels[0].bandwidth;
+          try {
+            engine.abrEwmaDefaultEstimate = Math.max(qualityLevels[0].bandwidth, 5000000);
+          } catch (eAbr) { /* ignore */ }
+        }
+        applyHlsJsQualityPreference(engine);
+        syncQualityIntoStreamInfo();
+        emit();
+      });
+      engine.on(global.Hls.Events.LEVEL_SWITCHED, function () {
+        if (token !== playToken) return;
+        updateStreamInfo();
+        emit();
+      });
       engine.on(global.Hls.Events.ERROR, function (event, data) {
         if (token !== playToken || !data || !data.fatal || userPaused) return;
         var netErr = data.type === global.Hls.ErrorTypes.NETWORK_ERROR;
@@ -601,7 +1032,125 @@
     });
   }
 
-  function startPlayback(channel, isAutoRetry) {
+  function downloadPlaylistText(url, timeoutMs) {
+    if (!global.ElionUtils || typeof ElionUtils.downloadText !== 'function') {
+      return Promise.reject(new Error('download unavailable'));
+    }
+    return ElionUtils.downloadText(url, { timeoutMs: timeoutMs || 2500, retries: 0 });
+  }
+
+  /**
+   * Discover published HLS variants. Expands one nested master level when the
+   * top playlist hides real resolutions behind another master.
+   * Never invents rungs; never restarts playback by itself.
+   */
+  function discoverHlsVariants(url, token, depth) {
+    depth = depth || 0;
+    return downloadPlaylistText(url, depth === 0 ? 2500 : 3000).then(function (text) {
+      if (token !== playToken) return [];
+      if (!/#EXT-X-STREAM-INF/i.test(text || '')) {
+        playlistKind = 'media';
+        qualityProbeNote = 'Channel URL is a media playlist (single rendition), not a multi-variant master.';
+        return [];
+      }
+      var levels = parseHlsMasterPlaylist(text, url);
+      var needsExpand = depth < 1 && levels.length > 0 && (
+        levels.length === 1 ||
+        !levels.some(function (l) { return l.height >= 720; })
+      );
+      if (!needsExpand) {
+        playlistKind = 'master';
+        qualityProbeNote = '';
+        return levels;
+      }
+      return Promise.all(levels.map(function (level) {
+        return downloadPlaylistText(level.url, 3000).then(function (child) {
+          if (!/#EXT-X-STREAM-INF/i.test(child || '')) return [level];
+          return parseHlsMasterPlaylist(child, level.url);
+        }).catch(function () { return [level]; });
+      })).then(function (groups) {
+        if (token !== playToken) return [];
+        var flat = [];
+        for (var i = 0; i < groups.length; i++) flat = flat.concat(groups[i] || []);
+        playlistKind = 'master-nested';
+        qualityProbeNote = 'Expanded nested HLS master playlist.';
+        return dedupeQualityLevels(flat);
+      });
+    });
+  }
+
+  function applyDiscoveredLevels(levels) {
+    qualityLevels = levels || [];
+    reconcilePreferredQuality();
+    if (qualityMode === 'auto' && qualityLevels.length && qualityLevels[0].bandwidth) {
+      abrStartBpsHint = qualityLevels[0].bandwidth;
+    }
+    syncQualityIntoStreamInfo();
+    emit();
+  }
+
+  function probeNativeHlsQualities(url, token) {
+    var probeId = qualityProbeToken;
+    discoverHlsVariants(url, token, 0).then(function (levels) {
+      if (probeId !== qualityProbeToken || token !== playToken) return;
+      applyDiscoveredLevels(levels);
+    }).catch(function () {
+      if (probeId !== qualityProbeToken || token !== playToken) return;
+      playlistKind = 'probe-failed';
+      qualityProbeNote = 'Could not inspect playlist from the app (often CORS). Native playback may still adapt.';
+      syncQualityIntoStreamInfo();
+      emit();
+    });
+  }
+
+  /**
+   * Brief probe before native attach so bps.start can target the highest
+   * published rung. Falls through quickly if the probe is slow/fails.
+   */
+  function attachNativeHlsWithProbe(url, format, token, channel) {
+    playbackEngine = 'native-hls';
+    var settled = false;
+    return new Promise(function (resolve) {
+      function go() {
+        if (settled || token !== playToken) {
+          resolve(false);
+          return;
+        }
+        settled = true;
+        try {
+          attachNative(url, format, token);
+        } catch (e) {
+          notePlaybackFailure(token, channel, '', false, 'failed');
+          resolve(false);
+          return;
+        }
+        finishPlayPromise(token, channel, video.play()).then(resolve, function () { resolve(false); });
+      }
+
+      var timer = setTimeout(function () {
+        qualityProbeNote = qualityProbeNote || 'Started before playlist probe finished.';
+        go();
+      }, 2800);
+
+      discoverHlsVariants(url, token, 0).then(function (levels) {
+        if (token !== playToken) return;
+        applyDiscoveredLevels(levels);
+        clearTimeout(timer);
+        go();
+      }).catch(function () {
+        if (token !== playToken) return;
+        playlistKind = 'probe-failed';
+        qualityProbeNote = 'Could not inspect playlist from the app (often CORS). Native playback may still adapt.';
+        syncQualityIntoStreamInfo();
+        emit();
+        clearTimeout(timer);
+        go();
+      });
+    });
+  }
+
+  function startPlayback(channel, isAutoRetry, opts) {
+    opts = opts || {};
     var token = ++playToken;
     userPaused = false;
     if (!isAutoRetry) {
@@ -610,7 +1159,21 @@
       clearRetryTimer();
       clearNetTimer();
     }
-    var url = ElionPlaylists.applyUdpProxy(channel.url);
+    if (!opts.keepQuality) {
+      qualityMode = readPreferredQuality() || 'auto';
+      if (!isAutoRetry) {
+        qualityLevels = [];
+        qualityProbeToken++;
+        abrStartBpsHint = 0;
+        playlistKind = '';
+        qualityProbeNote = '';
+        playbackEngine = '';
+      }
+    }
+    var masterUrl = ElionPlaylists.applyUdpProxy(channel.url);
+    var url = opts.streamUrl || masterUrl;
+    if (!opts.streamUrl) masterStreamUrl = masterUrl;
+    activeStreamUrl = url;
     var format = detectFormat(url);
     currentChannel = channel;
     status.channel = channel;
@@ -625,6 +1188,7 @@
     status.playing = false;
     status.format = format.label;
     status.streamInfo = { format: format.label, width: 0, height: 0, resolution: '—', tracks: [] };
+    syncQualityIntoStreamInfo();
     emit();
 
     if (/DASH|MKV|UDP|unsupported/i.test(format.label)) {
@@ -641,11 +1205,20 @@
       return attachHlsJs(url, token, channel);
     }
 
+    if (format.transport === 'HLS' && !opts.streamUrl) {
+      return attachNativeHlsWithProbe(url, format, token, channel);
+    }
+
+    playbackEngine = format.transport === 'HLS' ? 'native-hls' : 'uri';
     try {
       attachNative(url, format, token);
     } catch (e) {
       notePlaybackFailure(token, channel, '', false, 'failed');
       return Promise.resolve(false);
+    }
+
+    if (format.transport === 'HLS') {
+      probeNativeHlsQualities(masterStreamUrl || url, token);
     }
 
     return finishPlayPromise(token, channel, video.play());
@@ -943,6 +1516,8 @@
     listTextTracks: listTextTracks,
     selectAudioTrack: selectAudioTrack,
     selectTextTrack: selectTextTrack,
+    listQualityLevels: listQualityLevels,
+    selectQuality: selectQuality,
     applyTrackPreferences: applyTrackPreferences,
     getStatus: getStatus,
     onChange: onChange,
@@ -950,6 +1525,13 @@
     getCurrentChannel: function () { return currentChannel; },
     detectFormat: detectFormat,
     classifyPlaybackFault: classifyPlaybackFault,
-    nextRetryDelay: nextRetryDelay
+    nextRetryDelay: nextRetryDelay,
+    parseHlsMasterPlaylist: parseHlsMasterPlaylist,
+    dedupeQualityLevels: dedupeQualityLevels,
+    heightQualityLabel: heightQualityLabel,
+    qualityTierFromHeight: qualityTierFromHeight,
+    buildMediaOption: buildMediaOption,
+    qualityAdaptiveLimits: qualityAdaptiveLimits,
+    discoverHlsVariants: discoverHlsVariants
   };
 })(window);

@@ -60,13 +60,20 @@ assert(playlists.indexOf('Another playlist import is already in progress') !== -
 assert(settings.indexOf('Playback Settings') !== -1, 'Settings has Playback Settings');
 assert(settings.indexOf('set-audio-track') !== -1, 'Audio choices are selectable');
 assert(settings.indexOf('set-subtitle-track') !== -1, 'Subtitle choices are selectable');
+assert(settings.indexOf('id="setQuality"') !== -1, 'Video quality uses a dropdown select');
+assert(settings.indexOf('quality-select') !== -1, 'Video quality dropdown has TV-sized styling class');
+assert(settings.indexOf('Auto (Recommended)') !== -1, 'Auto (Recommended) is the default quality label');
+assert(screens.indexOf("querySelector('#setQuality')") !== -1, 'Quality dropdown change is wired for Magic Remote');
 assert(settings.indexOf('>Off') !== -1, 'Subtitles include Off');
 assert(player.indexOf('function listAudioTracks') !== -1, 'Audio tracks come from the player');
 assert(player.indexOf('function listTextTracks') !== -1, 'Subtitle tracks come from the player');
+assert(player.indexOf('function listQualityLevels') !== -1, 'Quality levels come from the player');
 assert(player.indexOf('function selectAudioTrack') !== -1, 'Audio selection does not rebuild the player');
 assert(player.indexOf('function selectTextTrack') !== -1, 'Subtitle selection does not rebuild the player');
+assert(player.indexOf('capLevelToPlayerSize: false') !== -1, 'HLS.js quality is not capped to player CSS size');
 assert(player.indexOf('applyTrackPreferences') !== -1, 'Saved track preference is applied when present');
 assert(storage.indexOf('preferredAudio') !== -1 && storage.indexOf('preferredSubtitle') !== -1, 'Track preferences are stored with settings');
+assert(storage.indexOf('preferredQuality') !== -1, 'Quality preference is stored with settings');
 assert(/function selectAudioTrack[\s\S]*playChannel\(/.test(player) === false, 'Changing audio does not restart playback');
 assert(/function selectTextTrack[\s\S]*playChannel\(/.test(player) === false, 'Changing subtitles does not restart playback');
 

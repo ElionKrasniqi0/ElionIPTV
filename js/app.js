@@ -1079,12 +1079,30 @@
         var info = document.getElementById('playerInfo');
         if (info && st.streamInfo) {
           var bits = [];
-          var res = st.streamInfo.resolution || '';
-          if (/^\d+x\d+$/i.test(res)) {
+          var res = st.streamInfo.decodedResolution || st.streamInfo.resolution || '';
+          var actualTier = st.streamInfo.actualTier || '';
+          if (!actualTier && /^\d+x\d+$/i.test(res)) {
             var h = parseInt(String(res).split('x')[1], 10);
-            bits.push(h >= 2000 ? '4K' : (h >= 700 ? 'HD' : 'SD'));
-          } else if (res) {
-            bits.push(res);
+            actualTier = h >= 2000 ? '4K' : (h >= 1000 ? 'FHD' : (h >= 700 ? 'HD' : (h > 0 ? 'SD' : '')));
+          }
+          if (st.streamInfo.sourceQualities && st.streamInfo.sourceQualities !== 'unknown') {
+            bits.push('Source ' + st.streamInfo.sourceQualities);
+          }
+          if (st.streamInfo.selectedQuality) {
+            bits.push('Selected ' + st.streamInfo.selectedQuality);
+          }
+          if (actualTier) {
+            bits.push('Playing ' + actualTier + (res && res !== '—' ? (' ' + res) : ''));
+          } else if (res && res !== '—') {
+            bits.push('Playing ' + res);
+          }
+          if (st.streamInfo.selectedBitrate) bits.push(st.streamInfo.selectedBitrate);
+          if (st.streamInfo.engine) {
+            bits.push(st.streamInfo.engine === 'native-hls' ? 'Native HLS' : (st.streamInfo.engine === 'hls.js' ? 'HLS.js' : st.streamInfo.engine));
+          }
+          if (st.streamInfo.codec) {
+            var codecShort = String(st.streamInfo.codec).split(',')[0].trim();
+            if (codecShort) bits.push(codecShort);
           }
           var audioN = (st.streamInfo.tracks || []).filter(function (t) { return t.type === 'audio'; }).length;
           var subN = (st.streamInfo.tracks || []).filter(function (t) { return t.type === 'text'; }).length;

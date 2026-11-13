@@ -201,6 +201,30 @@
         }).join('');
     }
 
+    var quality = { tracks: [{ id: 'auto', label: 'Auto (Recommended)', enabled: true }], mode: s.preferredQuality || 'auto', message: 'Start a channel to choose video quality.' };
+    try {
+      if (global.ElionPlayer && ElionPlayer.listQualityLevels) quality = ElionPlayer.listQualityLevels();
+    } catch (eQ) { /* keep defaults */ }
+    var selectedQuality = String(quality.mode || s.preferredQuality || 'auto');
+    var hasSelected = false;
+    var qualityOptions = (quality.tracks && quality.tracks.length ? quality.tracks : [{ id: 'auto', label: 'Auto (Recommended)' }]).map(function (t) {
+      var id = String(t.id);
+      var isSel = id === selectedQuality;
+      if (isSel) hasSelected = true;
+      return '<option value="' + ElionUtils.escapeHtml(id) + '"' + (isSel ? ' selected' : '') + '>' +
+        ElionUtils.escapeHtml(t.label || id) + '</option>';
+    }).join('');
+    if (!hasSelected) {
+      qualityOptions = '<option value="auto" selected>Auto (Recommended)</option>' + qualityOptions;
+    }
+    var selectedLabel = 'Auto (Recommended)';
+    for (var qi = 0; qi < (quality.tracks || []).length; qi++) {
+      if (String(quality.tracks[qi].id) === selectedQuality) {
+        selectedLabel = quality.tracks[qi].label || selectedLabel;
+        break;
+      }
+    }
+
     return (
       '<h3>Playback Settings</h3>' +
       '<div class="settings-block">' +
@@ -210,6 +234,18 @@
           '<div><label>Loading timeout (seconds)</label><input id="setBuffer" data-focusable type="number" inputmode="numeric" min="1" max="30" step="1" value="' + ElionUtils.escapeHtml(String(s.bufferSeconds || 3)) + '"></div>' +
           '<div><label>Player controls</label><select id="setControls" data-focusable><option value="auto"' + (!s.playerControlsPinned ? ' selected' : '') + '>Hide after 5 seconds</option><option value="pinned"' + (s.playerControlsPinned ? ' selected' : '') + '>Keep visible</option></select></div></div>' +
         '<p class="help">The timeout is how long a channel may take to start before it is reported as failed. Failed streams are not retried without a limit.</p>' +
+      '</div>' +
+      '<div class="settings-block"><h4>Video quality</h4>' +
+        '<p class="help">Choose Auto or a resolution published by the current channel. Unsupported options are never listed.</p>' +
+        '<div class="quality-select-wrap">' +
+          '<label for="setQuality">Video Quality</label>' +
+          '<select id="setQuality" class="quality-select" data-focusable aria-label="Video Quality">' + qualityOptions + '</select>' +
+          '<p class="quality-selected-hint">Selected: <strong>' + ElionUtils.escapeHtml(selectedLabel) + '</strong></p>' +
+        '</div>' +
+        '<p class="help">' + ElionUtils.escapeHtml(quality.message || 'Only qualities published by the stream are listed.') + '</p>' +
+        (s.preferredQuality && s.preferredQuality !== 'auto'
+          ? '<p class="help">Saved preference: ' + ElionUtils.escapeHtml(String(s.preferredQuality) + (/^\d+$/.test(String(s.preferredQuality)) ? 'p' : '')) + '</p>'
+          : '') +
       '</div>' +
       '<div class="settings-block"><h4>Audio</h4>' +
         (s.preferredAudio ? '<p class="help">Saved preference: ' + ElionUtils.escapeHtml(s.preferredAudio) + '</p>' : '') +
@@ -260,7 +296,7 @@
       '<img class="app-logo app-logo-about" src="assets/images/elion-iptv-logo.png" alt="ELION IPTV">' +
       '<ul class="checklist">' +
         '<li><strong>Application</strong> ELION IPTV</li>' +
-        '<li><strong>Version</strong> 1.1.1</li>' +
+        '<li><strong>Version</strong> 1.1.4</li>' +
         '<li><strong>Made for</strong> LG Smart TVs (webOS)</li>' +
         '<li><strong>Remote</strong> Magic Remote ready — arrows, OK, and Back</li>' +
         '<li><strong>Content</strong> Uses only the playlists you add</li>' +
